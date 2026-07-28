@@ -44,6 +44,12 @@ def ask(prompt_text: str, engine: Engine, config: ClientConfig) -> EngineRespons
                     "os": "windows",
                     "depth": 20,
                     "load_html": False,
+                    # Google charge souvent l'AI Overview APRÈS l'affichage de
+                    # la page. Sans ce champ, DataForSEO ne renvoie qu'un
+                    # emplacement vide (`asynchronous_ai_overview: true`, aucune
+                    # source). Mesuré le 28/07 : 0 source extraite alors que
+                    # l'AI Overview existait bel et bien.
+                    "load_async_ai_overview": True,
                 }
             ],
             timeout=TIMEOUT,
@@ -58,6 +64,18 @@ def ask(prompt_text: str, engine: Engine, config: ClientConfig) -> EngineRespons
         # DataForSEO renvoie 200 avec un code d'erreur applicatif dans le corps.
         if payload.get("status_code") not in (20000, None):
             result.error = f"DataForSEO {payload.get('status_code')}: {payload.get('status_message')}"
+            return result
+
+        # ⚠️ Piège : la requête peut réussir (20000 à la racine) alors que la
+        # TÂCHE a échoué (ex. 40101 Internal SE Server Error). Sans ce contrôle,
+        # on enregistrerait « 0 source, aucune erreur », c'est-à-dire une fausse
+        # mesure « Google ne cite personne » qui polluerait la série.
+        for task in payload.get("tasks") or []:
+            if task.get("status_code") not in (20000, None):
+                result.error = (
+                    f"tâche DataForSEO {task.get('status_code')}: {task.get('status_message')}"
+                )
+                return result
 
         result.usage = {"cost": payload.get("cost")}
         result.answer_text, result.sources, absent = _parse(payload)
