@@ -27,6 +27,12 @@ class Engine:
     search: bool
     enabled: bool
     repetitions: int | None = None  # sinon on prend celui du sampling global
+    # Tous les modèles n'acceptent pas le même outil de recherche ni les mêmes
+    # paramètres. Mesuré le 28/07 : Haiku 4.5 refuse `web_search_20260209` et
+    # ne connaît pas `effort`. On rend donc les deux explicites plutôt que
+    # de deviner à partir du nom du modèle.
+    search_tool: str = "web_search_20250305"
+    effort: str | None = None
 
 
 @dataclass
@@ -82,6 +88,8 @@ def load_client(name: str) -> ClientConfig:
                 search=bool(item.get("search", True)),
                 enabled=bool(item.get("enabled", True)),
                 repetitions=item.get("repetitions"),
+                search_tool=item.get("search_tool", "web_search_20250305"),
+                effort=item.get("effort"),
             )
         )
 

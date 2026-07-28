@@ -60,11 +60,12 @@ def ask(prompt_text: str, engine: Engine, config: ClientConfig) -> EngineRespons
             "model": engine.model,
             "max_tokens": MAX_TOKENS,
             "system": _system_prompt(config, engine.search),
-            # effort bas : la tâche est courte et on ne paie pas de la
-            # réflexion dont on n'a pas besoin pour mesurer des citations.
-            "output_config": {"effort": "low"},
             "messages": [{"role": "user", "content": prompt_text}],
         }
+        # `effort` n'existe pas sur tous les modèles (Haiku 4.5 le refuse) :
+        # on ne l'envoie que s'il est explicitement configuré.
+        if engine.effort:
+            params["output_config"] = {"effort": engine.effort}
         if engine.search:
             # max_uses borne le coût ET la variance : mesuré le 28/07, une même
             # question pouvait déclencher 1 ou 7 recherches selon l'humeur du
@@ -72,7 +73,7 @@ def ask(prompt_text: str, engine: Engine, config: ClientConfig) -> EngineRespons
             # avec la visibilité réelle. 3 recherches suffisent largement pour
             # une question unique.
             params["tools"] = [
-                {"type": "web_search_20260209", "name": "web_search", "max_uses": 3}
+                {"type": engine.search_tool, "name": "web_search", "max_uses": 3}
             ]
 
         messages = list(params["messages"])
