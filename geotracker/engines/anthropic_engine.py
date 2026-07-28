@@ -27,10 +27,21 @@ def _get_client() -> anthropic.Anthropic:
     return _client
 
 
-def _system_prompt(config: ClientConfig) -> str:
-    return (
+def _system_prompt(config: ClientConfig, search: bool) -> str:
+    base = (
         f"Tu réponds à un internaute situé en {config.country}, en français. "
         "Réponds comme tu le ferais dans une conversation normale."
+    )
+    if not search:
+        return base
+    # Sans cette consigne, le modèle répond parfois de mémoire alors que
+    # l'outil de recherche est disponible. On mesurerait alors son humeur du
+    # jour plutôt que la visibilité GEO, et la série deviendrait incomparable
+    # d'une semaine sur l'autre. Le produit grand public pousse lui aussi à
+    # chercher : cette consigne rapproche la mesure du comportement réel.
+    return base + (
+        " Fais TOUJOURS une recherche web avant de répondre, même si tu penses "
+        "connaître la réponse, puis appuie-toi sur les sources trouvées."
     )
 
 
@@ -48,14 +59,21 @@ def ask(prompt_text: str, engine: Engine, config: ClientConfig) -> EngineRespons
         params = {
             "model": engine.model,
             "max_tokens": MAX_TOKENS,
-            "system": _system_prompt(config),
+            "system": _system_prompt(config, engine.search),
             # effort bas : la tâche est courte et on ne paie pas de la
             # réflexion dont on n'a pas besoin pour mesurer des citations.
             "output_config": {"effort": "low"},
             "messages": [{"role": "user", "content": prompt_text}],
         }
         if engine.search:
-            params["tools"] = [{"type": "web_search_20260209", "name": "web_search"}]
+            # max_uses borne le coût ET la variance : mesuré le 28/07, une même
+            # question pouvait déclencher 1 ou 7 recherches selon l'humeur du
+            # modèle, ce qui faisait varier le nombre de sources sans rapport
+            # avec la visibilité réelle. 3 recherches suffisent largement pour
+            # une question unique.
+            params["tools"] = [
+                {"type": "web_search_20260209", "name": "web_search", "max_uses": 3}
+            ]
 
         messages = list(params["messages"])
         raw_payloads = []
