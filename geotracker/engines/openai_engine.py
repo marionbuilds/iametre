@@ -16,7 +16,43 @@ from ..config import ClientConfig, Engine
 from ..models import EngineResponse, Source
 
 ENDPOINT = "https://api.openai.com/v1/responses"
-TIMEOUT = 120.0
+TIMEOUT = 300.0
+MAX_RETRIES = 5
+
+# Un compte OpenAI neuf est plafonné à 10 000 tokens/minute, alors qu'un appel
+# avec recherche en consomme 13 000 à 30 000. Les erreurs 429 sont donc la
+# NORME au début, pas une anomalie : on attend le délai qu'OpenAI indique et on
+# recommence. Le plafond se relève tout seul avec l'ancienneté du compte.
+def _post_avec_reprise(body: dict, api_key: str) -> httpx.Response:
+    for tentative in range(MAX_RETRIES):
+        response = httpx.post(
+            ENDPOINT,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=body,
+            timeout=TIMEOUT,
+        )
+        if response.status_code != 429:
+            return response
+        attente = _delai_conseille(response) or (5 * 2**tentative)
+        if tentative == MAX_RETRIES - 1:
+            return response
+        time.sleep(min(attente, 120))
+    return response
+
+
+def _delai_conseille(response: httpx.Response) -> float | None:
+    """OpenAI indique le délai à respecter, soit en en-tête, soit dans le message."""
+    header = response.headers.get("retry-after")
+    if header:
+        try:
+            return float(header)
+        except ValueError:
+            pass
+    try:
+        message = response.json()["error"]["message"]
+        return float(message.split("try again in ")[1].split("s.")[0]) + 2
+    except Exception:
+        return None
 
 
 def ask(prompt_text: str, engine: Engine, config: ClientConfig) -> EngineResponse:
@@ -29,30 +65,29 @@ def ask(prompt_text: str, engine: Engine, config: ClientConfig) -> EngineRespons
     started = time.perf_counter()
 
     try:
+        # Sans la consigne explicite, gpt-5 répond DE MÉMOIRE sans jamais
+        # chercher, même avec l'outil disponible (mesuré le 28/07 : 0 recherche,
+        # 0 source). On mesurerait alors son humeur du jour au lieu de la
+        # visibilité GEO. Avec la consigne : 5 à 6 recherches, sources exploitables.
+        system = f"Tu réponds à un internaute situé en {config.country}, en français."
+        if engine.search:
+            system += (
+                " Fais TOUJOURS une recherche web avant de répondre, même si tu penses "
+                "connaître la réponse, puis appuie-toi sur les sources trouvées."
+            )
         body = {
             "model": engine.model,
             "input": [
-                {
-                    "role": "system",
-                    "content": (
-                        f"Tu réponds à un internaute situé en {config.country}, en français."
-                    ),
-                },
+                {"role": "system", "content": system},
                 {"role": "user", "content": prompt_text},
             ],
         }
         if engine.search:
-            body["tools"] = [{"type": "web_search"}]
+            # `search_context_size: low` réduit le volume de résultats avalés,
+            # donc le coût ET la pression sur la limite de débit.
+            body["tools"] = [{"type": "web_search", "search_context_size": "low"}]
 
-        response = httpx.post(
-            ENDPOINT,
-            headers={
-                "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}",
-                "Content-Type": "application/json",
-            },
-            json=body,
-            timeout=TIMEOUT,
-        )
+        response = _post_avec_reprise(body, os.environ["OPENAI_API_KEY"])
         payload = response.json()
         result.raw = payload
 
