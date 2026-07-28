@@ -1,0 +1,121 @@
+"""Chargement et validation du jeu de suivi d'un client."""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import yaml
+
+ROOT = Path(__file__).resolve().parent.parent
+CLIENTS_DIR = ROOT / "config" / "clients"
+
+
+@dataclass
+class Prompt:
+    id: str
+    text: str
+    type: str = "inconnue"
+
+
+@dataclass
+class Engine:
+    id: str
+    provider: str
+    model: str | None
+    search: bool
+    enabled: bool
+    repetitions: int | None = None  # sinon on prend celui du sampling global
+
+
+@dataclass
+class ClientConfig:
+    client: str
+    label: str
+    set_version: int
+    locale: str
+    country: str
+    target_domains: list[str]
+    brand_terms: list[str]
+    competitors: list[dict]
+    prompts: list[Prompt]
+    engines: list[Engine]
+    repetitions: int
+    repetitions_ai_overview: int
+    path: Path = field(default=None, repr=False)
+
+    def competitor_label(self, domain: str) -> str | None:
+        from .models import domain_matches
+
+        for competitor in self.competitors:
+            if domain_matches(domain, competitor["domain"]):
+                return competitor.get("label") or competitor["domain"]
+        return None
+
+    def repetitions_for(self, engine: Engine) -> int:
+        if engine.repetitions:
+            return engine.repetitions
+        if engine.provider == "dataforseo":
+            return self.repetitions_ai_overview
+        return self.repetitions
+
+
+def load_client(name: str) -> ClientConfig:
+    path = CLIENTS_DIR / f"{name}.yaml"
+    if not path.exists():
+        available = ", ".join(p.stem for p in CLIENTS_DIR.glob("*.yaml")) or "aucun"
+        raise FileNotFoundError(f"Client '{name}' introuvable. Disponibles : {available}")
+
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    sampling = raw.get("sampling", {})
+
+    engines = []
+    for item in raw.get("engines", []):
+        engines.append(
+            Engine(
+                id=item["id"],
+                # `provider` permet d'avoir deux entrées (avec / sans recherche)
+                # qui tapent le même fournisseur.
+                provider=item.get("provider", item["id"]),
+                model=item.get("model"),
+                search=bool(item.get("search", True)),
+                enabled=bool(item.get("enabled", True)),
+                repetitions=item.get("repetitions"),
+            )
+        )
+
+    prompts = [
+        Prompt(id=p["id"], text=p["text"], type=p.get("type", "inconnue"))
+        for p in raw.get("prompts", [])
+    ]
+
+    ids = [p.id for p in prompts]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Deux requêtes portent le même id : la série serait ambiguë.")
+
+    return ClientConfig(
+        client=raw["client"],
+        label=raw.get("label", raw["client"]),
+        set_version=int(raw.get("set_version", 1)),
+        locale=raw.get("locale", "fr-FR"),
+        country=raw.get("country", "France"),
+        target_domains=raw["target"]["domains"],
+        brand_terms=raw["target"].get("brand_terms", []),
+        competitors=raw.get("competitors", []),
+        prompts=prompts,
+        engines=engines,
+        repetitions=int(sampling.get("repetitions", 5)),
+        repetitions_ai_overview=int(sampling.get("repetitions_ai_overview", 3)),
+        path=path,
+    )
+
+
+def require_env(*names: str) -> None:
+    missing = [n for n in names if not os.environ.get(n)]
+    if missing:
+        raise RuntimeError(
+            "Variables d'environnement manquantes : "
+            + ", ".join(missing)
+            + ". Copie .env.example en .env et remplis-le."
+        )

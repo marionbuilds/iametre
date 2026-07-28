@@ -1,0 +1,50 @@
+name: Run hebdomadaire du tracker GEO
+
+# Le run tourne sur les serveurs GitHub, pas sur le Mac de Marion.
+# La collecte continue même pendant le déménagement à Montréal.
+on:
+  schedule:
+    - cron: "0 6 * * 1" # tous les lundis à 06h00 UTC
+  workflow_dispatch: # bouton "lancer maintenant" dans l'onglet Actions
+
+permissions:
+  contents: write # pour committer les données du run
+
+jobs:
+  collecte:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Lancer le run
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          DATAFORSEO_LOGIN: ${{ secrets.DATAFORSEO_LOGIN }}
+          DATAFORSEO_PASSWORD: ${{ secrets.DATAFORSEO_PASSWORD }}
+        run: python -m geotracker.run --client smart-bpjeps --note "cron hebdo"
+
+      - name: Générer le rapport
+        run: |
+          mkdir -p reports
+          python -m geotracker.report --client smart-bpjeps > "reports/$(date +%Y-%m-%d).txt"
+          python -m geotracker.report --client smart-bpjeps --serie > reports/serie.txt
+          cat reports/serie.txt
+
+      - name: Committer les données
+        run: |
+          git config user.name  "tracker-geo-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add data/ reports/
+          git diff --staged --quiet || git commit -m "run: $(date +%Y-%m-%d)"
+          git push
