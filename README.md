@@ -40,8 +40,22 @@ Les moteurs 1 à 4 interrogent des **modèles via API**, pas les **interfaces** 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env      # puis remplir les clés
 ```
+
+## Clés
+
+**Il n'y a pas de `.env` dans ce dépôt, et il ne faut pas en créer.** Les clés vivent dans un trousseau unique, commun à tous les projets, situé **hors de ce dépôt** : elles ne peuvent donc pas être commitées ici par accident.
+
+| Variable | Où l'obtenir |
+|---|---|
+| `ANTHROPIC_API_KEY` | console.anthropic.com (facturation séparée de l'abonnement Claude) |
+| `OPENAI_API_KEY` | platform.openai.com |
+| `PERPLEXITY_API_KEY` | perplexity.ai > Settings > API |
+| `DATAFORSEO_LOGIN` + `DATAFORSEO_PASSWORD` | dataforseo.com (un login et un mot de passe, pas une clé) |
+
+Ordre de résolution : variables d'environnement déjà définies (les secrets GitHub Actions gagnent toujours) → `TROUSSEAU_PATH` si défini → le trousseau commun → un `.env` local en dernier recours. Une valeur encore marquée `<À FOURNIR…>` est ignorée, pas prise pour une vraie clé.
+
+Pour le cron GitHub, les mêmes variables doivent être créées en **secrets du dépôt**.
 
 ## Usage
 

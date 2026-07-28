@@ -18,20 +18,41 @@ from .engines import get_engine, required_env
 from .extract import analyse
 
 
-def load_dotenv(path: Path = ROOT / ".env") -> None:
-    """Charge .env sans dépendance externe. N'écrase jamais l'environnement
-    existant : sur GitHub Actions ce sont les secrets qui doivent gagner."""
-    if not path.exists():
-        return
-    for line in path.read_text(encoding="utf-8").splitlines():
+# Un seul trousseau pour TOUS les projets de Marion, à la racine de Smart BPJEPS.
+# Volontairement HORS du dépôt Git du tracker : les clés ne peuvent donc pas
+# être commitées ici par accident.
+TROUSSEAU = ROOT.parent.parent / "trousseau.env"
+PLACEHOLDER = "<À FOURNIR"
+
+
+def load_dotenv(path: Path | None = None) -> Path | None:
+    """Charge le trousseau sans dépendance externe.
+
+    N'écrase JAMAIS une variable déjà présente : sur GitHub Actions ce sont les
+    secrets du dépôt qui doivent gagner. En local, c'est `trousseau.env`.
+    Un chemin explicite peut être imposé via la variable TROUSSEAU_PATH.
+    """
+    candidates = [
+        Path(os.environ["TROUSSEAU_PATH"]) if os.environ.get("TROUSSEAU_PATH") else None,
+        path,
+        TROUSSEAU,
+        ROOT / ".env",  # repli, non recommandé : on ne veut qu'UN fichier de clés
+    ]
+    source = next((p for p in candidates if p and p.exists()), None)
+    if source is None:
+        return None
+
+    for line in source.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
         key = key.strip()
         value = value.strip().strip('"').strip("'")
-        if key and value and key not in os.environ:
+        # Une valeur encore à remplir ne doit pas passer pour une vraie clé.
+        if key and value and not value.startswith(PLACEHOLDER) and key not in os.environ:
             os.environ[key] = value
+    return source
 
 
 def usable_engines(config, only: list[str] | None) -> tuple[list[Engine], list[str]]:
@@ -63,12 +84,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="n'appelle rien, montre le plan")
     args = parser.parse_args(argv)
 
-    load_dotenv()
+    source = load_dotenv()
     config = load_client(args.client)
     only = [e.strip() for e in args.engines.split(",")] if args.engines else None
     engines, skipped = usable_engines(config, only)
 
     prompts = config.prompts[: args.prompts] if args.prompts else config.prompts
+
+    print(f"Trousseau     : {source if source else 'aucun (secrets d environnement seuls)'}")
 
     tasks = []
     for prompt in prompts:
@@ -85,7 +108,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Appels prévus : {len(tasks)}")
 
     if not engines:
-        print("\n❌ Aucun moteur utilisable. Remplis .env (voir .env.example).")
+        print(
+            f"\n❌ Aucun moteur utilisable.\n"
+            f"   Renseigne les clés dans le trousseau commun : {TROUSSEAU}\n"
+            f"   (section « 📡 PARTIE TRACKER GEO », tout en bas du fichier)"
+        )
         return 1
     if args.dry_run:
         print("\n(dry-run : rien n'a été appelé)")

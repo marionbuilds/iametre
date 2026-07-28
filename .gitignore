@@ -1,4 +1,10 @@
+# Aucun fichier de clés ne doit vivre dans ce dépôt : elles sont dans le
+# trousseau commun, à la racine de Smart BPJEPS, hors dépôt. Ces règles ne sont
+# qu'une ceinture en plus des bretelles.
 .env
+*.env
+trousseau.env
+
 .venv/
 venv/
 __pycache__/
