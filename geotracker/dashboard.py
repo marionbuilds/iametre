@@ -329,30 +329,20 @@ body{font-family:var(--f-body); background:var(--bg); color:var(--ink); line-hei
 .app{display:flex; align-items:flex-start; gap:20px; max-width:1420px; margin:0 auto;
   padding:16px}
 
-.side{flex:none; width:226px; position:sticky; top:16px; height:calc(100vh - 32px);
-  min-height:520px; background:var(--forest); color:var(--sur-forest); border-radius:24px;
-  padding:22px 14px 18px; display:flex; flex-direction:column; gap:4px}
-.brand{display:flex; align-items:center; gap:11px; padding:0 8px; margin-bottom:22px}
-.brand__mark{width:36px; height:36px; border-radius:10px; background:rgba(239,246,232,.14);
-  display:grid; place-items:center; flex:none}
-.brand__name{font-family:var(--f-display); font-weight:700; font-size:1.08rem;
-  letter-spacing:-.01em}
-.brand__sub{font-size:.72rem; color:var(--sur-forest-soft)}
-.nav{display:flex; align-items:center; gap:11px; width:100%; border:none; background:none;
-  color:var(--sur-forest-soft); font-family:inherit; font-size:.89rem; font-weight:600;
-  padding:11px 12px; border-radius:12px; cursor:pointer; text-align:left}
-.nav svg{flex:none}
+.side{flex:none; width:76px; position:sticky; top:16px; height:calc(100vh - 32px);
+  min-height:480px; background:var(--forest); color:var(--sur-forest); border-radius:26px;
+  padding:16px 0 18px; display:flex; flex-direction:column; align-items:center; gap:8px}
+.brand{margin-bottom:16px}
+.brand__mark{width:44px; height:44px; border-radius:14px; background:rgba(239,246,232,.14);
+  display:grid; place-items:center}
+.nav{display:grid; place-items:center; width:46px; height:46px; border:none; background:none;
+  color:var(--sur-forest-soft); border-radius:15px; cursor:pointer}
 .nav[aria-selected="true"]{background:var(--forest-2); color:var(--sur-forest)}
 @media(hover:hover){.nav:hover{color:var(--sur-forest)}}
 .nav:focus-visible{outline:3px solid var(--lime); outline-offset:2px}
 .side__sep{flex:1}
-.btn--export{display:flex; align-items:center; justify-content:center; gap:9px; width:100%;
-  background:var(--lime); color:#1D3826; border:none; border-radius:12px; font-family:inherit;
-  font-weight:700; font-size:.85rem; padding:12px; cursor:pointer; transition:transform .15s}
-@media(hover:hover){.btn--export:hover{transform:translateY(-2px)}}
-.btn--export:focus-visible{outline:3px solid var(--sur-forest); outline-offset:2px}
-.side__note{font-size:.72rem; color:var(--sur-forest-soft); padding:13px 8px 0; line-height:1.5}
-.side__note strong{color:var(--sur-forest)}
+.side__client{width:38px; height:38px; border-radius:50%; background:var(--lime);
+  color:#1D3826; display:grid; place-items:center; font-weight:800; font-size:.95rem}
 
 .main{flex:1; min-width:0; padding:6px 2px 60px}
 .mhead{display:flex; align-items:flex-start; justify-content:space-between; gap:16px;
@@ -360,6 +350,24 @@ body{font-family:var(--f-body); background:var(--bg); color:var(--ink); line-hei
 .mhead h1{font-family:var(--f-display); font-weight:700; font-size:1.5rem;
   letter-spacing:-.02em; line-height:1.2}
 .mhead__sub{font-size:.82rem; color:var(--ink-soft); margin-top:3px}
+.mhead__acts{display:flex; align-items:center; gap:10px}
+.iconbtn{width:42px; height:42px; border-radius:50%; border:1px solid var(--line);
+  background:var(--paper); color:var(--ink); display:grid; place-items:center; cursor:pointer}
+.iconbtn:focus-visible{outline:3px solid var(--data-deep); outline-offset:2px}
+.btn--report{display:inline-flex; align-items:center; gap:8px; background:var(--forest);
+  color:var(--sur-forest); border:none; border-radius:999px; font-family:inherit;
+  font-weight:700; font-size:.88rem; padding:12px 22px; cursor:pointer;
+  transition:transform .15s}
+@media(hover:hover){.btn--report:hover{transform:translateY(-2px)}}
+.btn--report:focus-visible{outline:3px solid var(--data-deep); outline-offset:2px}
+.pop-wrap{position:relative}
+.pop{position:absolute; right:0; top:calc(100% + 8px); background:var(--paper);
+  border:1px solid var(--line); border-radius:14px; padding:14px; min-width:216px; z-index:10;
+  box-shadow:0 10px 30px rgba(21,42,28,.14)}
+.pop__t{font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em;
+  color:var(--ink-faint); margin-bottom:8px}
+.pop__row{display:flex; gap:6px}
+.toolrow{margin-bottom:18px}
 .chips{display:flex; align-items:center; gap:6px; flex-wrap:wrap}
 .chip{font-size:.78rem; font-weight:600; padding:6px 12px; border-radius:999px;
   background:var(--paper); border:1px solid var(--line); color:var(--ink); font-family:inherit}
@@ -523,12 +531,10 @@ table.d tr:last-child td{border-bottom:none}
 @media(max-width:1020px){
   .app{flex-direction:column; gap:14px}
   .side{position:static; width:100%; height:auto; min-height:0; flex-direction:row;
-    align-items:center; flex-wrap:wrap; border-radius:18px; padding:12px 14px}
+    border-radius:18px; padding:10px 14px}
   .brand{margin-bottom:0}
-  .nav{width:auto}
   .side__sep{display:none}
-  .btn--export{width:auto; margin-left:auto}
-  .side__note{display:none}
+  .side__client{margin-left:auto}
   .hero{grid-template-columns:1fr; text-align:center}
   .gauge{margin:0 auto}
   .hero__side{grid-template-columns:repeat(3,1fr); min-width:0}
@@ -550,7 +556,7 @@ table.d tr:last-child td{border-bottom:none}
 @media print{
   body{background:#fff}
   .app{display:block; padding:0; max-width:none}
-  .side,.chips,.mission__acts,.btn--mini,button{display:none!important}
+  .side,.chips,.mhead__acts,.pop,.mission__acts,.btn--mini,button{display:none!important}
   .print-head{display:flex; align-items:baseline; justify-content:space-between; gap:12px;
     padding-bottom:14px; margin-bottom:18px; border-bottom:2px solid #1D3826}
   .print-head strong{font-size:1.1rem}
@@ -608,6 +614,33 @@ JS = """
   per.forEach(function(o){o.addEventListener('click',function(){
     per.forEach(function(x){x.setAttribute('aria-selected',x===o?'true':'false');});
     filtre(parseInt(o.getAttribute('data-jours'),10));
+  });});
+  var rg=document.getElementById('reglages'), pop=document.getElementById('pop-reglages');
+  if(rg&&pop){
+    rg.addEventListener('click',function(){
+      var ouvert=pop.hidden;
+      pop.hidden=!ouvert;
+      rg.setAttribute('aria-expanded',ouvert?'true':'false');
+    });
+    document.addEventListener('click',function(e){
+      if(!pop.hidden&&!pop.contains(e.target)&&!rg.contains(e.target)){
+        pop.hidden=true; rg.setAttribute('aria-expanded','false');
+      }
+    });
+  }
+  var CLE='iametre-theme', themes=[].slice.call(document.querySelectorAll('.theme'));
+  function appliqueTheme(v){
+    if(v){document.documentElement.setAttribute('data-theme',v);}
+    else{document.documentElement.removeAttribute('data-theme');}
+    themes.forEach(function(b){
+      b.setAttribute('aria-selected',(b.getAttribute('data-theme-val')||'')===(v||'')?'true':'false');
+    });
+  }
+  try{appliqueTheme(localStorage.getItem(CLE)||'');}catch(e){}
+  themes.forEach(function(b){b.addEventListener('click',function(){
+    var v=this.getAttribute('data-theme-val')||'';
+    try{if(v){localStorage.setItem(CLE,v);}else{localStorage.removeItem(CLE);}}catch(e){}
+    appliqueTheme(v);
   });});
 })();
 """
@@ -975,41 +1008,32 @@ def rendu(d: dict) -> str:
 
     return f"""<div class="app">
   <aside class="side">
-    <div class="brand">
+    <div class="brand" title="{_e(p['nom'])} · {_e(p['signature'])}">
       <div class="brand__mark" aria-hidden="true">
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+        <svg width="24" height="24" viewBox="0 0 20 20" fill="none">
           <path d="M2 15 L2 11 M5.2 15 L5.2 8 M8.4 15 L8.4 11 M11.6 15 L11.6 5 M14.8 15 L14.8 11 M18 15 L18 8"
                 stroke="#EFF6E8" stroke-width="1.8" stroke-linecap="round"/></svg>
       </div>
-      <div><div class="brand__name">{_e(p['nom'])}</div>
-        <div class="brand__sub">{_e(p['signature'])}</div></div>
     </div>
-    <button class="nav" role="tab" aria-selected="true" aria-controls="v-res">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <button class="nav" role="tab" aria-selected="true" aria-controls="v-res"
+            title="Vue d'ensemble" aria-label="Vue d'ensemble">
+      <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
         <path d="M2 13 L2 8 M6 13 L6 3 M10 13 L10 6 M14 13 L14 9"
-              stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
-      Vue d'ensemble</button>
-    <button class="nav" role="tab" aria-selected="false" aria-controls="v-req">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+    <button class="nav" role="tab" aria-selected="false" aria-controls="v-req"
+            title="Requêtes" aria-label="Requêtes">
+      <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
         <circle cx="7" cy="7" r="4.4" stroke="currentColor" stroke-width="1.7"/>
         <path d="M10.5 10.5 L14 14" stroke="currentColor" stroke-width="1.7"
-              stroke-linecap="round"/></svg>
-      Requêtes</button>
-    <button class="nav" role="tab" aria-selected="false" aria-controls="v-col">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              stroke-linecap="round"/></svg></button>
+    <button class="nav" role="tab" aria-selected="false" aria-controls="v-col"
+            title="Collectes" aria-label="Collectes">
+      <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
         <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.7"/>
         <path d="M8 4.5 L8 8 L10.6 9.6" stroke="currentColor" stroke-width="1.7"
-              stroke-linecap="round"/></svg>
-      Collectes</button>
+              stroke-linecap="round"/></svg></button>
     <div class="side__sep"></div>
-    <button class="btn--export" id="exporter">
-      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <path d="M8 2 L8 10 M4.8 7 L8 10.2 L11.2 7 M3 13.5 L13 13.5"
-              stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
-              stroke-linejoin="round"/></svg>
-      Exporter le rapport</button>
-    <p class="side__note"><strong>{_e(_prochaine_collecte())}</strong>
-      Publie aujourd'hui, mesure l'effet ensuite.</p>
+    <div class="side__client" title="{_e(d['client_label'])}">{_e(d['client_label'][:1].upper())}</div>
   </aside>
   <main class="main">
     <div class="print-head"><strong>{_e(p['nom'])} · {_e(d['client_label'])}</strong>
@@ -1017,16 +1041,42 @@ def rendu(d: dict) -> str:
     <header class="mhead">
       <div><h1>{_e(d['client_label'])}</h1>
         <p class="mhead__sub">Collecte #{d['run_id']} · {_e(d['date'])} ·
-          {d['resume']['n']} appels</p></div>
-      <div class="chips" role="group" aria-label="Période">
-        {client}
-        <button class="chip per" data-jours="7" aria-selected="false">7 jours</button>
-        <button class="chip per" data-jours="28" aria-selected="false">28 jours</button>
-        <button class="chip per" data-jours="90" aria-selected="false">3 mois</button>
-        <button class="chip per" data-jours="0" aria-selected="true">Tout</button>
-        <span class="chip chip--etat" id="per-etat">toutes les collectes</span>
+          {d['resume']['n']} appels · {_e(_prochaine_collecte())}</p></div>
+      <div class="mhead__acts">
+        <div class="pop-wrap">
+          <button class="iconbtn" id="reglages" aria-expanded="false"
+                  title="Réglages" aria-label="Réglages">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M8 1.6 L8 3.4 M8 12.6 L8 14.4 M1.6 8 L3.4 8 M12.6 8 L14.4 8
+                       M3.5 3.5 L4.8 4.8 M11.2 11.2 L12.5 12.5 M12.5 3.5 L11.2 4.8
+                       M4.8 11.2 L3.5 12.5"
+                    stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </button>
+          <div class="pop" id="pop-reglages" hidden>
+            <p class="pop__t">Thème</p>
+            <div class="pop__row">
+              <button class="chip theme" data-theme-val="" aria-selected="true">Auto</button>
+              <button class="chip theme" data-theme-val="light" aria-selected="false">Clair</button>
+              <button class="chip theme" data-theme-val="dark" aria-selected="false">Sombre</button>
+            </div>
+          </div>
+        </div>
+        <button class="btn--report" id="exporter">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 3 L8 13 M3 8 L13 8" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round"/></svg>
+          Créer un rapport</button>
       </div>
     </header>
+    <div class="toolrow chips" role="group" aria-label="Période">
+      {client}
+      <button class="chip per" data-jours="7" aria-selected="false">7 jours</button>
+      <button class="chip per" data-jours="28" aria-selected="false">28 jours</button>
+      <button class="chip per" data-jours="90" aria-selected="false">3 mois</button>
+      <button class="chip per" data-jours="0" aria-selected="true">Tout</button>
+      <span class="chip chip--etat" id="per-etat">toutes les collectes</span>
+    </div>
     <div id="v-res" role="tabpanel">{_vue_resultats(d)}</div>
     <div id="v-req" role="tabpanel" hidden>{_vue_requetes(d)}</div>
     <div id="v-col" role="tabpanel" hidden>{_vue_collectes(d)}</div>
