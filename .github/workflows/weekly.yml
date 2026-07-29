@@ -32,7 +32,9 @@ jobs:
           PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
           DATAFORSEO_LOGIN: ${{ secrets.DATAFORSEO_LOGIN }}
           DATAFORSEO_PASSWORD: ${{ secrets.DATAFORSEO_PASSWORD }}
-        run: python -m geotracker.run --client smart-bpjeps --note "cron hebdo"
+        # --sauf-si-recente : si une mesure d'impact a tourné ce week-end,
+        # le lundi ne paie pas une collecte redondante.
+        run: python -m geotracker.run --client smart-bpjeps --sauf-si-recente 2 --note "cron hebdo"
 
       - name: Générer le rapport
         run: |

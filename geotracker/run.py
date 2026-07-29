@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from datetime import date, datetime, timezone
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -82,7 +83,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--db", default=str(db.DEFAULT_DB))
     parser.add_argument("--note", default="")
     parser.add_argument("--dry-run", action="store_true", help="n'appelle rien, montre le plan")
+    parser.add_argument("--sauf-si-recente", type=int, metavar="JOURS",
+                        help="ne rien lancer si une collecte du client date de moins de JOURS jours")
     args = parser.parse_args(argv)
+
+    # Garde-fou anti-doublon (Marion, 29/07/2026) : la mesure d'impact après
+    # publication ne doit pas payer une collecte qui vient d'avoir lieu (le
+    # cron du lundi, par exemple). Sauter n'est PAS un échec : code retour 0.
+    if args.sauf_si_recente:
+        conn = db.connect(args.db)
+        row = conn.execute("SELECT MAX(started_at) AS m FROM runs WHERE client = ?",
+                           (args.client,)).fetchone()
+        conn.close()
+        if row and row["m"]:
+            age = (datetime.now(timezone.utc).date() - date.fromisoformat(row["m"][:10])).days
+            if age < args.sauf_si_recente:
+                print(f"⏭  Collecte sautée : la dernière ({row['m'][:10]}) date d'il y a "
+                      f"{age} jour(s), seuil fixé à {args.sauf_si_recente}. "
+                      f"Rien n'a été appelé, rien n'a été payé.")
+                return 0
 
     source = load_dotenv()
     config = load_client(args.client)

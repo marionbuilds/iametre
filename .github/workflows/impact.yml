@@ -1,0 +1,114 @@
+name: Mesure d'impact après publication
+
+# Le parcours utilisateur vu par Marion (29/07/2026) : « je viens de publier
+# une page → mesure l'effet dans quelques jours », sans doublonner avec le
+# cron du lundi.
+#
+# Comment s'en servir : onglet Actions → ce workflow → « Run workflow »,
+# choisir dans combien de jours mesurer et noter ce qui a été publié.
+# Un passage quotidien (07h00 UTC, après le cron hebdo de 06h00) vérifie si
+# une mesure est due. Si une collecte a déjà eu lieu il y a moins de 2 jours,
+# la mesure est repoussée au lendemain au lieu d'être payée en double.
+on:
+  workflow_dispatch:
+    inputs:
+      jours:
+        description: "Mesurer dans combien de jours ?"
+        required: true
+        default: "5"
+      note:
+        description: "Ce qui vient d'être publié"
+        required: false
+        default: "publication"
+  schedule:
+    - cron: "0 7 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  programmer:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enregistrer la date de mesure
+        env:
+          JOURS: ${{ github.event.inputs.jours }}
+          NOTE: ${{ github.event.inputs.note }}
+        run: |
+          DUE=$(date -u -d "+${JOURS} days" +%F)
+          printf '%s\n%s\n' "$DUE" "$NOTE" > data/mesure-impact.txt
+          git config user.name  "tracker-geo-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add data/mesure-impact.txt
+          git commit -m "impact: mesure programmée pour le $DUE ($NOTE)"
+          git push
+          echo "✅ Mesure d'impact programmée pour le $DUE."
+
+  verifier:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: La mesure est-elle due ?
+        id: due
+        run: |
+          if [ ! -f data/mesure-impact.txt ]; then
+            echo "Aucune mesure programmée."
+            echo "go=non" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          DUE=$(head -1 data/mesure-impact.txt)
+          AUJOURDHUI=$(date -u +%F)
+          if [ "$AUJOURDHUI" \< "$DUE" ]; then
+            echo "Programmée pour le $DUE, pas encore due."
+            echo "go=non" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=oui" >> "$GITHUB_OUTPUT"
+            echo "note=$(tail -1 data/mesure-impact.txt)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.due.outputs.go == 'oui'
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - if: steps.due.outputs.go == 'oui'
+        run: pip install -r requirements.txt
+
+      - name: Collecte de mesure d'impact
+        if: steps.due.outputs.go == 'oui'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          DATAFORSEO_LOGIN: ${{ secrets.DATAFORSEO_LOGIN }}
+          DATAFORSEO_PASSWORD: ${{ secrets.DATAFORSEO_PASSWORD }}
+        run: |
+          AVANT=$(sqlite3 data/runs.sqlite3 "SELECT COUNT(*) FROM runs;")
+          python -m geotracker.run --client smart-bpjeps --sauf-si-recente 2 \
+            --note "mesure d'impact : ${{ steps.due.outputs.note }}"
+          APRES=$(sqlite3 data/runs.sqlite3 "SELECT COUNT(*) FROM runs;")
+          if [ "$APRES" -gt "$AVANT" ]; then
+            # La collecte a eu lieu : la mesure est faite, on retire le marqueur.
+            rm -f data/mesure-impact.txt
+            mkdir -p reports
+            python -m geotracker.report --client smart-bpjeps > "reports/$(date -u +%F).txt"
+            python -m geotracker.report --client smart-bpjeps --serie > reports/serie.txt
+          else
+            echo "Collecte trop récente : la mesure d'impact retentera demain."
+          fi
+
+      - name: Committer les données
+        if: steps.due.outputs.go == 'oui'
+        run: |
+          git config user.name  "tracker-geo-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add data/ reports/
+          git diff --staged --quiet || git commit -m "impact: mesure du $(date -u +%F)"
+          git push
