@@ -1,18 +1,44 @@
 # Identité du produit.
 #
-# ⚠️ C'EST LE SEUL ENDROIT où le nom du produit est écrit. Changer ces trois
-# lignes renomme l'intégralité de l'interface. Le nom n'est donc pas une
-# décision à figer : c'est un réglage.
-#
-# Pistes libres dans l'écosystème GEO (vérifié le 28/07/2026, aucune collision) :
-#   Geoscope · Baromètre GEO · GeoCitations · Sextant · Vigie
-# À éviter : "radar" (Ahrefs a déjà Brand Radar) et "geo tracker"
-# (en anglais, un « geo tracker » est un traceur GPS).
+# ⚠️ C'EST LE SEUL ENDROIT où le nom est écrit. Changer ces deux lignes renomme
+# l'intégralité de l'interface. Le nom n'est donc pas une décision à figer :
+# c'est un réglage.
 
-nom: "Tracker GEO"
+nom: "IAmètre"
 
-# La signature porte les mots-clés du marché, pas le nom. Elle peut évoluer
+# La signature porte les mots-clés du marché, pas le nom : elle peut évoluer
 # quand le vocabulaire du secteur bougera, sans toucher au produit.
-# Marché francophone : GEO a gagné. Marché anglophone : aucun consensus
-# (GEO, AEO, AI SEO, LLMO coexistent), d'où la version bilingue.
-signature: "Suivi de visibilité GEO · AI search visibility tracking"
+signature: "Mesure de visibilité dans les moteurs IA"
+
+
+# ── Pourquoi ce nom, et pourquoi PAS sa traduction ────────────────────────────
+# Décidé avec Marion le 28/07/2026. Ne pas re-litiger sans élément nouveau.
+#
+# CE QUI MARCHE
+#   « IA »    est un vrai terme de recherche francophone, à côté de GEO
+#             (« référencement IA », « agence référencement IA »).
+#             Le mot-clé est donc dans la marque : chaque mention renforce
+#             l'association topique. C'est une tactique SEO assumée.
+#   « -mètre » dit instrument de mesure, comme baromètre ou thermomètre.
+#             C'est LA thèse du produit : une réponse d'IA n'est pas stable,
+#             on ne la constate pas, on la mesure.
+#
+# POURQUOI PAS « AI Meter »
+#   « AI metering » désigne DÉJÀ, en anglais, le suivi de consommation et de
+#   facturation des API d'IA. Catégorie installée et financée : Metering.ai,
+#   OpenMeter (Kong), Metronome (Stripe), Amberflo. Un anglophone du milieu
+#   tech comprendrait « outil qui mesure ma facture d'IA ». Côté référencement,
+#   ce serait se battre contre des startups financées sur un sujet sans rapport.
+#   En français, « mètre » ne porte aucune connotation de facturation : libre.
+#
+# POURQUOI UN NOM FRANÇAIS EST UN ATOUT, PAS UN COMPROMIS
+#   L'angle différenciant du projet est le marché francophone (master §D) :
+#   presque tous les outils GEO sont pensés en anglais pour le marché
+#   américain. À Montréal, où le français est une exigence légale et
+#   commerciale, un nom français est un positionnement.
+#
+# NOMS ÉCARTÉS, ET POURQUOI
+#   Tracker GEO   en anglais, un « geo tracker » est un traceur GPS
+#   Brand Radar   déjà pris par Ahrefs
+#   Sextant       joli mais ne porte aucun mot-clé du marché
+#   Pistes restées libres si besoin : Geoscope · Baromètre GEO · GeoCitations
