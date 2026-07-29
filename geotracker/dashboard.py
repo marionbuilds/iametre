@@ -396,26 +396,31 @@ table.d tr:last-child td{border-bottom:0}
 .note{font-size:12.5px; color:var(--ink-2); margin:16px 0 0; max-width:74ch}
 [hidden]{display:none!important}
 
-/* --- bandeau d'en-tete : le chiffre, le cap, les trois reperes --- */
-.entete{display:grid; grid-template-columns:auto 1fr auto; gap:38px; align-items:center}
-@media(max-width:1080px){.entete{grid-template-columns:1fr; gap:24px}}
-.gros{display:flex; align-items:baseline; gap:20px}
-.chiffre{font-size:64px; font-weight:700; letter-spacing:-.045em; line-height:1}
-.chiffre s{text-decoration:none; font-size:.4em; font-weight:600; margin-left:2px}
-.gros p{margin:0; color:var(--ink-2); font-size:13.5px; max-width:22ch}
-.gros em{display:block; font-style:normal; color:var(--ink-3); font-size:12px; margin-top:3px}
-.cap{min-width:210px}
+/* --- carte du taux : jauge, chiffre, puis le cap a atteindre --- */
+.gros{display:flex; align-items:center; gap:8px; margin-bottom:22px; flex-wrap:wrap}
+.gros svg{flex:none; margin-left:-8px}
+.chiffre{font-size:56px; font-weight:700; letter-spacing:-.045em; line-height:1}
+.chiffre s{text-decoration:none; font-size:.42em; font-weight:600; margin-left:2px}
+.gros p{margin:6px 0 0; color:var(--ink-2); font-size:13.5px; max-width:24ch}
 .cap .jauge{position:relative; height:8px; border-radius:4px; background:var(--h0)}
 .cap .jauge i{display:block; height:100%; border-radius:4px; background:var(--data)}
 .cap .jauge u{position:absolute; top:-5px; width:2px; height:18px; border-radius:1px;
   background:var(--ink-3); text-decoration:none}
 .cap p{margin:11px 0 0; font-size:12.5px; color:var(--ink-2)}
 .cap b{color:var(--ink); font-weight:600}
-.mini-kpi{display:flex; gap:30px; flex-wrap:wrap}
-.mini-kpi div{display:flex; flex-direction:column; gap:1px}
-.mini-kpi span{font-size:11.5px; color:var(--ink-3)}
-.mini-kpi b{font-size:23px; font-weight:660; letter-spacing:-.022em}
-.mini-kpi em{font-style:normal; font-size:11.5px; color:var(--ink-3)}
+
+/* --- carte des reperes --- */
+.reperes{display:flex; flex-direction:column; gap:18px}
+.reperes>div:not(.tete){display:flex; flex-direction:column; gap:1px}
+.reperes span{font-size:11.5px; color:var(--ink-3)}
+.reperes b{font-size:26px; font-weight:660; letter-spacing:-.022em; line-height:1.15}
+.reperes em{font-style:normal; font-size:11.5px; color:var(--ink-3)}
+
+/* --- barres par moteur : le libelle porte sa propre interpretation --- */
+.rang{grid-template-columns:minmax(150px,240px) 1fr auto}
+.rang .lib{white-space:normal; line-height:1.3}
+.rang .lib s{display:block; text-decoration:none; font-size:11.5px; color:var(--ink-3);
+  margin-top:2px}
 
 /* --- tableaux : la colonne d'interpretation est le coeur du produit --- */
 table.d td.fort{font-weight:550; color:var(--ink)}
@@ -511,10 +516,22 @@ def _diagnostic(q: dict) -> str:
 
 
 def _objectif(taux: float) -> tuple[int, float]:
-    """Le palier suivant, par tranches de 10 points. Donne un cap plutôt qu'un
+    """Le palier suivant, par tranches de 10 points : un cap plutôt qu'un
     simple constat, sans inventer d'objectif arbitraire."""
     palier = min(100, (int(taux // 10) + 1) * 10)
     return palier, palier - taux
+
+
+def _jauge(taux: float) -> str:
+    """Demi-cercle : la forme juste pour un ratio unique face à un maximum."""
+    longueur = 3.14159 * 84
+    return f"""<svg width="188" height="106" viewBox="0 0 196 108" aria-hidden="true">
+<path d="M14 100 A84 84 0 0 1 182 100" fill="none" stroke="var(--h0)"
+      stroke-width="16" stroke-linecap="round"/>
+<path d="M14 100 A84 84 0 0 1 182 100" fill="none" stroke="var(--data)"
+      stroke-width="16" stroke-linecap="round"
+      stroke-dasharray="{longueur:.1f}" stroke-dashoffset="{longueur * (1 - taux / 100):.1f}"/>
+</svg>"""
 
 
 def _vue_resultats(d: dict) -> str:
@@ -527,15 +544,18 @@ def _vue_resultats(d: dict) -> str:
     palier, reste = _objectif(taux)
     n_jours = len(d["serie"])
 
-    def tr_moteur(m: dict) -> str:
-        classe = ' class="faible"' if m["taux"] < SEUIL_TROU else ""
+    def rang_moteur(m: dict) -> str:
         barre = "trou" if m["taux"] < SEUIL_TROU else ""
         nom = NOMS_MOTEURS.get(m["id"], m["id"])
+        lecture = _lecture_moteur(m, d["moteurs"])
+        tip = f"{nom} : {m['cites']} citations sur {m['ok']} appels"
+        if m["rang"]:
+            tip += f" · rang moyen {m['rang']:.1f}"
         return (
-            f"<tr{classe}><td class=\"fort\">{_e(nom)}</td>"
-            f'<td class="n"><span class="mini"><i class="{barre}" '
-            f'style="width:{m["taux"]:.0f}%"></i></span><b>{m["taux"]:.0f} %</b></td>'
-            f'<td class="lec">{_e(_lecture_moteur(m, d["moteurs"]))}</td></tr>'
+            f'<div class="rang" data-tip="{_e(tip)}">'
+            f'<span class="lib">{_e(nom)}<s>{_e(lecture)}</s></span>'
+            f'<span class="piste"><i class="{barre}" style="width:{m["taux"]:.0f}%"></i></span>'
+            f'<span class="v">{m["taux"]:.0f}%</span></div>'
         )
 
     def tr_voix(v: dict) -> str:
@@ -556,7 +576,7 @@ def _vue_resultats(d: dict) -> str:
             f'<td class="lec">{_e(_diagnostic(q))}</td></tr>'
         )
 
-    moteurs = "".join(tr_moteur(m) for m in d["moteurs"])
+    moteurs = "".join(rang_moteur(m) for m in d["moteurs"])
     voix = "".join(tr_voix(v) for v in d["voix"][:7])
     ecrire = "".join(tr_ecrire(q) for q in trous) or (
         '<tr><td colspan="3" class="lec">Aucun trou de contenu sur cette collecte.</td></tr>'
@@ -575,34 +595,35 @@ def _vue_resultats(d: dict) -> str:
 
     return f"""<div class="grille">
 
-<div class="carte forte c12 entete">
-  <div class="gros">
-    <div class="chiffre">{taux:.0f}<s>%</s></div>
-    <p>des réponses d'IA citent la marque
-      <em>mesuré sur {r['n']} appels, {len(d['moteurs'])} moteurs</em></p>
-  </div>
+<div class="carte forte c7">
+  <div class="tete"><h2>Taux de citation</h2>
+    <button class="aide" data-tip="Une réponse d'IA n'est pas stable : posée trois fois, la même question peut donner trois réponses différentes. Ce taux est mesuré, pas constaté une fois.">?</button>
+    <em>{r['n']} appels</em></div>
+  <div class="gros">{_jauge(taux)}
+    <div><div class="chiffre">{taux:.0f}<s>%</s></div>
+      <p>des réponses citent la marque</p></div></div>
   <div class="cap" data-tip="Le palier suivant se calcule par tranches de 10 points : un cap, sans objectif arbitraire.">
     <div class="jauge"><i style="width:{taux:.0f}%"></i><u style="left:{palier}%"></u></div>
     <p><b>+{reste:.0f} points</b> pour atteindre le palier de {palier}&nbsp;%</p>
   </div>
-  <div class="mini-kpi">
-    <div><span>Part de voix</span><b>{part}</b><em>{rang_moi} sur {d['domaines_distincts']} domaines</em></div>
-    <div><span>Rang moyen</span><b>{rang_moyen}</b><em>dans les sources</em></div>
-    <div><span>Historique</span><b>{n_jours}</b><em>jour{s_jours} de mesure</em></div>
-  </div>
+</div>
+
+<div class="carte c5 reperes">
+  <div class="tete"><h2>Repères</h2></div>
+  <div><span>Part de voix</span><b>{part}</b><em>{rang_moi} position sur {d['domaines_distincts']} domaines cités</em></div>
+  <div><span>Rang moyen en source</span><b>{rang_moyen}</b><em>place dans la liste des sources</em></div>
+  <div><span>Historique</span><b>{n_jours}</b><em>jour{s_jours} de mesure</em></div>
 </div>
 
 <div class="carte c7">
   <div class="tete"><h2>Par moteur</h2>
     <button class="aide" data-tip="La dernière ligne mesure autre chose : le modèle connaît-il la marque sans aller chercher sur le web ?">?</button></div>
-  <div class="tw"><table class="d">
-    <tr><th>Moteur</th><th>Taux</th><th>Ce qu'il faut en comprendre</th></tr>
-    {moteurs}</table></div>
+  <div class="rangs">{moteurs}</div>
 </div>
 
 <div class="carte c5">
   <div class="tete"><h2>Part de voix</h2>
-    <em>{d['total_citations']} citations · {d['domaines_distincts']} domaines</em></div>
+    <em>{d['total_citations']} citations</em></div>
   <div class="tw"><table class="d">
     <tr><th>Domaine</th><th>Part</th><th>Rang</th><th></th></tr>
     {voix}</table></div>
