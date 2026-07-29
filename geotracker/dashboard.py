@@ -776,7 +776,7 @@ def _vue_resultats(d: dict) -> str:
       <div class="mission__impact">{_e(_promesse(_impact(cible, d["requetes"], r)))}<small>impact estimé, borne basse</small></div>
       <div class="mission__acts">
         <button class="btn--ghost" data-copy="{_e(_brief(cible, d))}" data-ok="Brief copié">Copier le brief</button>
-        <button class="btn btn--primary" data-copy="{_e(_prompt_ia(cible, d))}" data-ok="Prompt copié, colle-le dans une IA">Copier le prompt d'article</button>
+        <button class="btn btn--primary" data-copy="{_e(_prompt_ia(cible, d))}" data-ok="Recette copiée, colle-la dans une IA">Copier la recette d'article</button>
       </div>
     </div>
   </section>"""
@@ -786,7 +786,7 @@ def _vue_resultats(d: dict) -> str:
         f'<article class="queue__card"><div class="queue__txt">'
         f'<h3>{_cite(q["texte"])}</h3><p>{_e(_diagnostic(q))}</p>'
         f'<button class="btn--mini" data-copy="{_e(_prompt_ia(q, d))}" '
-        f'data-ok="Prompt copié">Copier le prompt d\'article</button></div>'
+        f'data-ok="Recette copiée">Copier la recette d\'article</button></div>'
         f'<div class="queue__rate{" queue__rate--warn" if q["taux"] >= 10 else ""}">'
         f'{q["taux"]:.0f} %</div></article>'
         for q in suite
