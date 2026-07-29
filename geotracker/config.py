@@ -33,6 +33,13 @@ class Engine:
     # de deviner à partir du nom du modèle.
     search_tool: str = "web_search_20250305"
     effort: str | None = None
+    # OpenAI a deux formes d'API incompatibles : `responses` (gpt-5, l'outil de
+    # recherche renvoie les pages dans le contexte facturé) et
+    # `chat_completions` (modèles *-search-preview, la recherche est faite côté
+    # serveur et n'est pas facturée en tokens). Mesuré le 28/07 : 48 tokens
+    # d'entrée contre 29 034. D'où un champ explicite plutôt qu'une devinette
+    # sur le nom du modèle.
+    api: str = "responses"
 
 
 @dataclass
@@ -90,6 +97,7 @@ def load_client(name: str) -> ClientConfig:
                 repetitions=item.get("repetitions"),
                 search_tool=item.get("search_tool", "web_search_20250305"),
                 effort=item.get("effort"),
+                api=item.get("api", "responses"),
             )
         )
 
