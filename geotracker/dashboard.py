@@ -379,6 +379,22 @@ body{font-family:var(--f-body); background:var(--bg); color:var(--ink); line-hei
   color:var(--ink-faint); margin-bottom:8px}
 .pop__row{display:flex; gap:6px}
 .toolrow{margin-bottom:18px}
+.reqform{display:flex; gap:10px; margin:2px 0 16px; flex-wrap:wrap}
+.reqform input{flex:1; min-width:240px; border:1px solid var(--line); border-radius:999px;
+  padding:12px 18px; font-family:inherit; font-size:.9rem; background:var(--bg);
+  color:var(--ink)}
+.reqform input:focus-visible{outline:3px solid var(--data-deep); outline-offset:1px}
+.reqform input::placeholder{color:var(--ink-faint)}
+.reqattente{border:1px dashed var(--line); border-radius:14px; padding:14px 16px;
+  margin-bottom:16px}
+.reqattente__t{font-size:.78rem; font-weight:600; color:var(--ink-soft); margin-bottom:8px}
+.reqattente ul{list-style:none; display:grid; gap:6px; margin-bottom:10px}
+.reqattente li{display:flex; align-items:center; justify-content:space-between; gap:12px;
+  font-size:.88rem; background:var(--data-soft); color:var(--ink);
+  border-radius:10px; padding:8px 12px}
+.reqattente li button{border:none; background:none; color:var(--ink-faint); cursor:pointer;
+  font-size:1rem; line-height:1; padding:2px}
+a.btn--mini{text-decoration:none; display:inline-block; margin-top:0}
 .chips{display:flex; align-items:center; gap:6px; flex-wrap:wrap}
 .chip{font-size:.78rem; font-weight:600; padding:6px 12px; border-radius:999px;
   background:var(--paper); border:1px solid var(--line); color:var(--ink); font-family:inherit}
@@ -653,6 +669,55 @@ JS = """
     try{if(v){localStorage.setItem(CLE,v);}else{localStorage.removeItem(CLE);}}catch(e){}
     appliqueTheme(v);
   });});
+  var CLE_REQ='iametre-requetes-proposees',
+      champ=document.getElementById('req-champ'),
+      valider=document.getElementById('req-valider'),
+      attente=document.getElementById('req-attente'),
+      listeEl=document.getElementById('req-liste'),
+      envoyer=document.getElementById('req-envoyer');
+  function litProps(){
+    try{return JSON.parse(localStorage.getItem(CLE_REQ)||'[]');}catch(e){return [];}
+  }
+  function ecritProps(l){
+    try{localStorage.setItem(CLE_REQ,JSON.stringify(l));}catch(e){}
+  }
+  function dessine(){
+    if(!listeEl){return;}
+    var l=litProps();
+    attente.hidden=l.length===0;
+    listeEl.innerHTML='';
+    l.forEach(function(q,i){
+      var li=document.createElement('li'), s=document.createElement('span'),
+          x=document.createElement('button');
+      s.textContent=q;
+      x.textContent='\u00d7';
+      x.setAttribute('aria-label','Retirer cette proposition');
+      x.addEventListener('click',function(){
+        var l2=litProps(); l2.splice(i,1); ecritProps(l2); dessine();
+      });
+      li.appendChild(s); li.appendChild(x); listeEl.appendChild(li);
+    });
+    if(envoyer){
+      var corps='Requetes a ajouter au jeu de suivi (statut : en observation) :\n\n'
+                +l.map(function(q){return '- '+q;}).join('\n');
+      envoyer.href='https://github.com/marionbuilds/tracker-geo/issues/new'
+        +'?title='+encodeURIComponent('Ajout de requetes au jeu de suivi')
+        +'&body='+encodeURIComponent(corps);
+    }
+  }
+  if(valider){
+    valider.addEventListener('click',function(){
+      var v=(champ.value||'').trim();
+      if(v.length<10){champ.focus();return;}
+      var l=litProps();
+      if(l.indexOf(v)===-1){l.push(v);ecritProps(l);}
+      champ.value=''; dessine();
+    });
+    champ.addEventListener('keydown',function(e){
+      if(e.key==='Enter'){valider.click();}
+    });
+    dessine();
+  }
 })();
 """
 
@@ -986,6 +1051,19 @@ def _vue_requetes(d: dict) -> str:
   <p class="card__lead">Une requête est une question posée comme un humain la pose, pas un mot-clé.
   <strong>Ajouter une requête est sans danger ; en modifier une casse la comparabilité de la
   série.</strong></p>
+  <div class="reqform">
+    <input id="req-champ" type="text" maxlength="180"
+           placeholder="Proposer une requête, formulée comme on la poserait à une IA…"
+           aria-label="Nouvelle requête à suivre">
+    <button class="btn--report" id="req-valider">Valider</button>
+  </div>
+  <div class="reqattente" id="req-attente" hidden>
+    <p class="reqattente__t">En attente d'intégration à la prochaine collecte
+      (~1&nbsp;$/mois par requête) :</p>
+    <ul id="req-liste"></ul>
+    <a id="req-envoyer" class="btn--mini" target="_blank" rel="noopener"
+       href="https://github.com/marionbuilds/tracker-geo/issues/new">Transmettre au tracker</a>
+  </div>
   <div class="tw"><table class="d">
   <tr><th>Requête</th><th>Réf.</th><th>Type</th><th>Citation</th><th>Ratio</th></tr>
   {lignes}</table></div></section>"""
@@ -1030,14 +1108,19 @@ def rendu(d: dict) -> str:
     <button class="nav" role="tab" aria-selected="true" aria-controls="v-res"
             title="Vue d'ensemble" aria-label="Vue d'ensemble">
       <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <path d="M2 13 L2 8 M6 13 L6 3 M10 13 L10 6 M14 13 L14 9"
-              stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+        <rect x="2" y="2" width="5.2" height="5.2" rx="1.6" stroke="currentColor" stroke-width="1.6"/>
+        <rect x="8.8" y="2" width="5.2" height="5.2" rx="1.6" stroke="currentColor" stroke-width="1.6"/>
+        <rect x="2" y="8.8" width="5.2" height="5.2" rx="1.6" stroke="currentColor" stroke-width="1.6"/>
+        <rect x="8.8" y="8.8" width="5.2" height="5.2" rx="1.6" stroke="currentColor" stroke-width="1.6"/></svg></button>
     <button class="nav" role="tab" aria-selected="false" aria-controls="v-req"
             title="Requêtes" aria-label="Requêtes">
       <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <circle cx="7" cy="7" r="4.4" stroke="currentColor" stroke-width="1.7"/>
-        <path d="M10.5 10.5 L14 14" stroke="currentColor" stroke-width="1.7"
-              stroke-linecap="round"/></svg></button>
+        <rect x="2" y="2" width="12" height="12" rx="3" stroke="currentColor" stroke-width="1.6"/>
+        <circle cx="5.6" cy="5.6" r="1.05" fill="currentColor"/>
+        <circle cx="10.4" cy="5.6" r="1.05" fill="currentColor"/>
+        <circle cx="8" cy="8" r="1.05" fill="currentColor"/>
+        <circle cx="5.6" cy="10.4" r="1.05" fill="currentColor"/>
+        <circle cx="10.4" cy="10.4" r="1.05" fill="currentColor"/></svg></button>
     <button class="nav" role="tab" aria-selected="false" aria-controls="v-col"
             title="Collectes" aria-label="Collectes">
       <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
