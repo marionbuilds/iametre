@@ -115,6 +115,16 @@ def report_run(conn, run_id: int, previous_id: int | None) -> None:
               f"{row['prompt_text'][:58]}")
 
     print("\n## Part de voix  (qui occupe la place)")
+    # ⚠️ Le dénominateur couvre TOUS les domaines cités, pas seulement les 15
+    # affichés : sinon la part est gonflée par la troncature de l'affichage.
+    total = (
+        conn.execute(
+            """SELECT COUNT(*) n FROM sources s JOIN responses r ON r.id = s.response_id
+               WHERE r.run_id = ? AND s.domain IS NOT NULL AND s.domain <> ''""",
+            (run_id,),
+        ).fetchone()["n"]
+        or 1
+    )
     rows = conn.execute(
         """
         SELECT s.domain, s.is_target, s.competitor,
@@ -126,7 +136,13 @@ def report_run(conn, run_id: int, previous_id: int | None) -> None:
         """,
         (run_id,),
     ).fetchall()
-    total = sum(r["citations"] for r in rows) or 1
+    distincts = conn.execute(
+        """SELECT COUNT(DISTINCT s.domain) n FROM sources s
+           JOIN responses r ON r.id = s.response_id
+           WHERE r.run_id = ? AND s.domain IS NOT NULL AND s.domain <> ''""",
+        (run_id,),
+    ).fetchone()["n"]
+    print(f"  ({total} citations réparties sur {distincts} domaines distincts)")
     for row in rows:
         tag = "  ⬅ TOI" if row["is_target"] else (f"  [{row['competitor']}]" if row["competitor"] else "")
         print(f"  {row['citations']:>4}  {row['citations']/total*100:>4.1f} %  "
