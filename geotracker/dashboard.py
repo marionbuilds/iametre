@@ -396,6 +396,36 @@ table.d tr:last-child td{border-bottom:0}
 .note{font-size:12.5px; color:var(--ink-2); margin:16px 0 0; max-width:74ch}
 [hidden]{display:none!important}
 
+/* --- bandeau d'en-tete : le chiffre, le cap, les trois reperes --- */
+.entete{display:grid; grid-template-columns:auto 1fr auto; gap:38px; align-items:center}
+@media(max-width:1080px){.entete{grid-template-columns:1fr; gap:24px}}
+.gros{display:flex; align-items:baseline; gap:20px}
+.chiffre{font-size:64px; font-weight:700; letter-spacing:-.045em; line-height:1}
+.chiffre s{text-decoration:none; font-size:.4em; font-weight:600; margin-left:2px}
+.gros p{margin:0; color:var(--ink-2); font-size:13.5px; max-width:22ch}
+.gros em{display:block; font-style:normal; color:var(--ink-3); font-size:12px; margin-top:3px}
+.cap{min-width:210px}
+.cap .jauge{position:relative; height:8px; border-radius:4px; background:var(--h0)}
+.cap .jauge i{display:block; height:100%; border-radius:4px; background:var(--data)}
+.cap .jauge u{position:absolute; top:-5px; width:2px; height:18px; border-radius:1px;
+  background:var(--ink-3); text-decoration:none}
+.cap p{margin:11px 0 0; font-size:12.5px; color:var(--ink-2)}
+.cap b{color:var(--ink); font-weight:600}
+.mini-kpi{display:flex; gap:30px; flex-wrap:wrap}
+.mini-kpi div{display:flex; flex-direction:column; gap:1px}
+.mini-kpi span{font-size:11.5px; color:var(--ink-3)}
+.mini-kpi b{font-size:23px; font-weight:660; letter-spacing:-.022em}
+.mini-kpi em{font-style:normal; font-size:11.5px; color:var(--ink-3)}
+
+/* --- tableaux : la colonne d'interpretation est le coeur du produit --- */
+table.d td.fort{font-weight:550; color:var(--ink)}
+table.d td.lec{color:var(--ink-2); font-size:12.5px; line-height:1.4}
+table.d tr.moi td{background:rgba(42,120,214,.08)}
+table.d tr.moi td:first-child{border-radius:8px 0 0 8px}
+table.d tr.moi td:last-child{border-radius:0 8px 8px 0}
+table.d tr.moi td.fort{font-weight:680}
+table.d b.rouge{color:var(--gap)}
+
 #tip{position:fixed; z-index:20; pointer-events:none; opacity:0; transform:translateY(3px);
   transition:opacity .12s,transform .12s; background:rgba(10,13,18,.94); color:#fff;
   font-size:12.5px; line-height:1.45; padding:8px 11px; border-radius:9px; max-width:280px;
@@ -441,27 +471,50 @@ JS = """
 """
 
 
-def _palier(taux) -> str:
-    """Rampe séquentielle à 6 pas : une seule teinte, du clair au foncé.
-    Jamais d'arc-en-ciel sur une grandeur continue."""
-    if taux is None:
-        return "vide"
-    for seuil, classe in ((1, "h0"), (20, "h1"), (40, "h2"), (60, "h3"), (80, "h4")):
-        if taux < seuil:
-            return classe
-    return "h5"
+def _lecture_moteur(m: dict, tous: list[dict]) -> str:
+    """LA colonne qui fait la différence : un chiffre seul ne dit rien, on écrit
+    ce qu'il faut en comprendre. C'est le §6 du master, « la valeur n'est pas
+    dans le tableau de bord, elle est dans l'interprétation ».
+    Aucun outil du marché ne propose cette colonne."""
+    if not m["recherche"]:
+        return (
+            "le modèle ne connaît pas encore la marque sans aller chercher"
+            if m["taux"] < 5
+            else "le modèle commence à connaître la marque de mémoire"
+        )
+    avec = [x for x in tous if x["recherche"]]
+    if not avec:
+        return ""
+    meilleur = max(x["taux"] for x in avec)
+    pire = min(x["taux"] for x in avec)
+    rangs = [x["rang"] for x in avec if x["rang"]]
+    if m["taux"] >= meilleur:
+        ecart = meilleur - pire
+        return "le moteur le plus favorable, et de loin" if ecart > 20 else "le moteur le plus favorable"
+    if m["rang"] and rangs and m["rang"] <= min(rangs):
+        return f"le plus dur à percer, mais la meilleure place quand la marque y est"
+    if m["taux"] <= pire:
+        return "le plus difficile à percer"
+    if m["rang"]:
+        return f"bien placée quand elle y est, rang {m['rang']:.1f}"
+    return ""
 
 
-def _jauge(taux: float) -> str:
-    """Un demi-cercle : la forme juste pour un ratio unique face à un maximum."""
-    longueur = 3.14159 * 84
-    return f"""<svg width="196" height="112" viewBox="0 0 196 112" aria-hidden="true">
-<path d="M14 100 A84 84 0 0 1 182 100" fill="none" stroke="var(--h0)"
-      stroke-width="15" stroke-linecap="round"/>
-<path d="M14 100 A84 84 0 0 1 182 100" fill="none" stroke="var(--data)"
-      stroke-width="15" stroke-linecap="round"
-      stroke-dasharray="{longueur:.1f}" stroke-dashoffset="{longueur * (1 - taux / 100):.1f}"/>
-</svg>"""
+def _diagnostic(q: dict) -> str:
+    """Même principe côté requêtes : un pourcentage bas n'est pas un échec,
+    c'est un sujet manquant. On le dit, au lieu de laisser lire un chiffre."""
+    if q["taux"] < 1:
+        return "aucun contenu sur ce sujet : personne ne cite parce qu'il n'y a rien à citer"
+    if q["taux"] < 10:
+        return "quasi invisible, alors que la question est posée"
+    return "sujet proche de l'offre, mais la marque y est trop peu présente"
+
+
+def _objectif(taux: float) -> tuple[int, float]:
+    """Le palier suivant, par tranches de 10 points. Donne un cap plutôt qu'un
+    simple constat, sans inventer d'objectif arbitraire."""
+    palier = min(100, (int(taux // 10) + 1) * 10)
+    return palier, palier - taux
 
 
 def _vue_resultats(d: dict) -> str:
@@ -470,119 +523,105 @@ def _vue_resultats(d: dict) -> str:
     moi = next((v for v in d["voix"] if v["moi"]), None)
     place = next((i for i, v in enumerate(d["voix"], 1) if v["moi"]), None)
     trous = [q for q in d["requetes"] if q["taux"] < SEUIL_TROU]
+    forts = [q for q in d["requetes"] if q["taux"] >= 60][:5]
+    palier, reste = _objectif(taux)
     n_jours = len(d["serie"])
 
-    moteurs = "".join(
-        f'<div class="rang" data-tip="{_e(NOMS_MOTEURS.get(m["id"], m["id"]))} : '
-        f'{m["cites"]} citations sur {m["ok"]} appels'
-        + (f' · rang moyen {m["rang"]:.1f}' if m["rang"] else "")
-        + f'"><span class="lib">{_e(NOMS_MOTEURS.get(m["id"], m["id"]))}</span>'
-        f'<span class="piste"><i class="{"trou" if m["taux"] < SEUIL_TROU else ""}" '
-        f'style="width:{m["taux"]:.0f}%"></i></span>'
-        f'<span class="v">{m["taux"]:.0f}%</span></div>'
-        for m in d["moteurs"]
-    )
+    def tr_moteur(m: dict) -> str:
+        classe = ' class="faible"' if m["taux"] < SEUIL_TROU else ""
+        barre = "trou" if m["taux"] < SEUIL_TROU else ""
+        nom = NOMS_MOTEURS.get(m["id"], m["id"])
+        return (
+            f"<tr{classe}><td class=\"fort\">{_e(nom)}</td>"
+            f'<td class="n"><span class="mini"><i class="{barre}" '
+            f'style="width:{m["taux"]:.0f}%"></i></span><b>{m["taux"]:.0f} %</b></td>'
+            f'<td class="lec">{_e(_lecture_moteur(m, d["moteurs"]))}</td></tr>'
+        )
 
-    autres = max(0.0, 100 - sum(v["part"] for v in d["voix"]))
-    segments = "".join(
-        f'<span class="{"moi" if v["moi"] else ""}" style="flex:{v["part"]:.2f}" '
-        f'data-tip="{_e(v["domaine"])} : {v["part"]:.1f} % · {v["n"]} citations · '
-        f'rang moyen {v["rang"]:.1f}"></span>'
-        for v in d["voix"]
-    ) + (
-        f'<span style="flex:{autres:.2f}" data-tip="Tous les autres domaines : '
-        f'{autres:.1f} %"></span>' if autres > 0.5 else ""
-    )
-    liste = "".join(
-        f'<div data-tip="{_e(v["label"] or v["domaine"])}">'
-        f'<i class="{"moi" if v["moi"] else ""}"></i>{_e(v["domaine"])}'
-        f'<b>{v["part"]:.1f}%</b></div>'
-        for v in d["voix"][:6]
-    )
+    def tr_voix(v: dict) -> str:
+        classe = ' class="moi"' if v["moi"] else ""
+        note = v["label"] or ("la marque suivie" if v["moi"] else "")
+        return (
+            f"<tr{classe}><td class=\"fort\">{_e(v['domaine'])}</td>"
+            f'<td class="n"><b>{v["part"]:.1f} %</b></td>'
+            f'<td class="n">{v["rang"]:.1f}</td>'
+            f'<td class="lec">{_e(note)}</td></tr>'
+        )
 
-    cols = "".join(
-        f'<th data-tip="{_e(NOMS_MOTEURS.get(m["id"], m["id"]))}">'
-        f'{_e(NOMS_MOTEURS.get(m["id"], m["id"]).split(",")[0].split(" ")[0])}</th>'
-        for m in d["moteurs"]
+    def tr_ecrire(q: dict) -> str:
+        rouge = ' class="rouge"' if q["taux"] < 10 else ""
+        return (
+            f'<tr><td class="fort">{_e(q["texte"])}</td>'
+            f'<td class="n"><b{rouge}>{q["taux"]:.0f} %</b></td>'
+            f'<td class="lec">{_e(_diagnostic(q))}</td></tr>'
+        )
+
+    moteurs = "".join(tr_moteur(m) for m in d["moteurs"])
+    voix = "".join(tr_voix(v) for v in d["voix"][:7])
+    ecrire = "".join(tr_ecrire(q) for q in trous) or (
+        '<tr><td colspan="3" class="lec">Aucun trou de contenu sur cette collecte.</td></tr>'
     )
-    rangees = ""
-    for q in sorted(d["requetes"], key=lambda x: x["taux"], reverse=True):
-        cells = ""
-        for m in d["moteurs"]:
-            t = d["matrice"].get((q["id"], m["id"]))
-            libelle = "—" if t is None else f"{t:.0f}"
-            cells += (
-                f'<td class="{_palier(t)}" data-tip="{_e(q["texte"])} · '
-                f'{_e(NOMS_MOTEURS.get(m["id"], m["id"]))} : '
-                f'{"pas de données" if t is None else f"{t:.0f} % de citation"}">{libelle}</td>'
-            )
-        rangees += f'<tr><th class="g lib" data-tip="{_e(q["texte"])}">{_e(q["texte"])}</th>{cells}</tr>'
+    points = "".join(
+        f'<tr><td class="fort">{_e(q["texte"])}</td>'
+        f'<td class="n"><b>{q["taux"]:.0f} %</b></td></tr>'
+        for q in forts
+    ) or '<tr><td colspan="2" class="lec">Aucune requête au-dessus de 60 %.</td></tr>'
 
-    todo = "".join(
-        f'<a href="#" onclick="return false" data-tip="Citée {q["cites"]} fois sur {q["ok"]} appels">'
-        f'<i class="pt"></i><span class="q">{_e(q["texte"])}'
-        f'<s>Aucun contenu ne répond à cette question</s></span>'
-        f'<span class="n">{q["taux"]:.0f}%</span></a>'
-        for q in trous
-    ) or '<a href="#" onclick="return false"><i class="pt" style="background:var(--data)"></i>' \
-         '<span class="q">Aucun trou de contenu<s>Toutes les requêtes dépassent le seuil</s>' \
-         '</span></a>'
-
-    part = f"{moi['part']:.1f}<s>%</s>" if moi else "n/d"
+    part = f"{moi['part']:.1f} %" if moi else "n/d"
     rang_moi = ("1<sup>re</sup>" if place == 1 else f"{place}<sup>e</sup>") if place else "—"
-    rang = f"{r['avg_rank']:.1f}" if r["avg_rank"] else "n/d"
+    rang_moyen = f"{r['avg_rank']:.1f}" if r["avg_rank"] else "n/d"
+    s_jours = "s" if n_jours > 1 else ""
+    s_trous = "s" if len(trous) > 1 else ""
 
     return f"""<div class="grille">
 
-<div class="carte forte c5">
-  <div class="tete"><h2>Taux de citation</h2>
-    <button class="aide" data-tip="Une réponse d'IA n'est pas stable : posée trois fois, la même question peut donner trois réponses différentes. Ce taux est mesuré sur {r['n']} appels, pas constaté une fois.">?</button>
-    <em>{r['n']} appels</em></div>
-  <div class="jauge">{_jauge(taux)}
-    <div class="txt"><div class="n">{taux:.0f}<s>%</s></div>
-      <p>des réponses citent la marque</p></div></div>
-</div>
-
-<div class="carte c4 stat">
-  <div class="tete"><h2>Part de voix</h2>
-    <button class="aide" data-tip="Part de la marque dans l'ensemble des {d['total_citations']} citations relevées, réparties sur {d['domaines_distincts']} domaines.">?</button></div>
-  <div class="n">{part}</div>
-  <div class="sous"><b>{rang_moi}</b> position sur {d['domaines_distincts']} domaines</div>
-</div>
-
-<div class="carte c3 stat" style="grid-column:span 3">
-  <div class="tete"><h2>Rang en source</h2></div>
-  <div class="n">{rang}</div>
-  <div class="sous">{n_jours} jour{'s' if n_jours > 1 else ''} de mesure</div>
-</div>
-
-<div class="carte c5">
-  <div class="tete"><h2>Par moteur</h2>
-    <button class="aide" data-tip="La ligne « mémoire de marque » mesure autre chose : le modèle connaît-il la marque sans aller chercher sur le web ?">?</button></div>
-  <div class="rangs">{moteurs}</div>
+<div class="carte forte c12 entete">
+  <div class="gros">
+    <div class="chiffre">{taux:.0f}<s>%</s></div>
+    <p>des réponses d'IA citent la marque
+      <em>mesuré sur {r['n']} appels, {len(d['moteurs'])} moteurs</em></p>
+  </div>
+  <div class="cap" data-tip="Le palier suivant se calcule par tranches de 10 points : un cap, sans objectif arbitraire.">
+    <div class="jauge"><i style="width:{taux:.0f}%"></i><u style="left:{palier}%"></u></div>
+    <p><b>+{reste:.0f} points</b> pour atteindre le palier de {palier}&nbsp;%</p>
+  </div>
+  <div class="mini-kpi">
+    <div><span>Part de voix</span><b>{part}</b><em>{rang_moi} sur {d['domaines_distincts']} domaines</em></div>
+    <div><span>Rang moyen</span><b>{rang_moyen}</b><em>dans les sources</em></div>
+    <div><span>Historique</span><b>{n_jours}</b><em>jour{s_jours} de mesure</em></div>
+  </div>
 </div>
 
 <div class="carte c7">
-  <div class="tete"><h2>Part de voix</h2><em>{d['domaines_distincts']} domaines</em></div>
-  <div class="empile">{segments}</div>
-  <div class="liste">{liste}</div>
+  <div class="tete"><h2>Par moteur</h2>
+    <button class="aide" data-tip="La dernière ligne mesure autre chose : le modèle connaît-il la marque sans aller chercher sur le web ?">?</button></div>
+  <div class="tw"><table class="d">
+    <tr><th>Moteur</th><th>Taux</th><th>Ce qu'il faut en comprendre</th></tr>
+    {moteurs}</table></div>
 </div>
 
-<div class="carte c8">
-  <div class="tete"><h2>Requêtes × moteurs</h2>
-    <button class="aide" data-tip="Taux de citation pour chaque couple requête / moteur. Une colonne pâle signale un moteur aveugle ; une ligne pâle, un sujet sans contenu.">?</button>
-    <em>% de citation</em></div>
-  <div class="tw"><table class="mat"><tr><th class="g"></th>{cols}</tr>{rangees}</table></div>
-  <div class="echelle"><span>0</span>
-    <u style="background:var(--h0)"></u><u style="background:var(--h1)"></u>
-    <u style="background:var(--h2)"></u><u style="background:var(--h3)"></u>
-    <u style="background:var(--h4)"></u><u style="background:var(--h5)"></u>
-    <span>100 %</span></div>
+<div class="carte c5">
+  <div class="tete"><h2>Part de voix</h2>
+    <em>{d['total_citations']} citations · {d['domaines_distincts']} domaines</em></div>
+  <div class="tw"><table class="d">
+    <tr><th>Domaine</th><th>Part</th><th>Rang</th><th></th></tr>
+    {voix}</table></div>
 </div>
 
-<div class="carte c4">
-  <div class="tete"><h2>À écrire</h2><em>{len(trous)} sujet{'s' if len(trous) > 1 else ''}</em></div>
-  <div class="todo">{todo}</div>
+<div class="carte forte c7">
+  <div class="tete"><h2>Ce qu'il faut écrire</h2>
+    <button class="aide" data-tip="Une requête où la marque est absente n'est pas un échec : c'est un sujet sur lequel aucun contenu n'existe encore.">?</button>
+    <em>{len(trous)} sujet{s_trous}</em></div>
+  <div class="tw"><table class="d">
+    <tr><th>Requête</th><th>Taux</th><th>Diagnostic</th></tr>
+    {ecrire}</table></div>
+</div>
+
+<div class="carte c5">
+  <div class="tete"><h2>Points forts</h2><em>ce qui a été travaillé se voit</em></div>
+  <div class="tw"><table class="d">
+    <tr><th>Requête</th><th>Taux</th></tr>
+    {points}</table></div>
 </div>
 
 </div>"""
