@@ -159,7 +159,8 @@ def collecte(conn, run_id: int) -> dict:
     ).fetchall():
         s = run_summary(conn, r["id"])
         if s["n"]:
-            historique.append(dict(id=r["id"], date=r["started_at"][:16].replace("T", " à "),
+            historique.append(dict(id=r["id"], iso=r["started_at"][:10],
+                                   date=r["started_at"][:16].replace("T", " à "),
                                    note=r["note"] or "", n=s["n"], erreurs=s["errors"],
                                    taux=s["rate"]))
 
@@ -209,6 +210,23 @@ def _impact(q: dict, requetes: list[dict], resume: dict) -> float:
     cible = bonnes[len(bonnes) // 2]
     gagnees = max(0.0, (cible - q["taux"]) / 100 * q["ok"])
     return gagnees / resume["ok"] * 100
+
+
+def _marge(r: dict) -> float:
+    """Marge de fluctuation à 95 % du taux de citation, en points.
+
+    Une réponse d'IA est non déterministe : le taux mesuré est un sondage,
+    pas un recensement. Sur n appels avec une proportion p, l'écart type
+    d'échantillonnage vaut sqrt(p(1-p)/n) ; à effort strictement constant,
+    la mesure suivante a 95 % de chances de tomber dans ±1,96 écart type.
+    C'est LA réponse au « pourquoi j'ai perdu 3 points sans rien changer ? » :
+    parce que 3 points, ici, c'est du bruit. L'interface ne doit jamais
+    présenter comme un événement une variation qui tient dans cette marge.
+    """
+    if not r["ok"] or r["rate"] is None:
+        return 0.0
+    prop = r["rate"] / 100
+    return 1.96 * math.sqrt(prop * (1 - prop) / r["ok"]) * 100
 
 
 def _objectif(taux: float) -> tuple[int, float]:
@@ -276,46 +294,81 @@ def _e(v) -> str:
 CSS = """
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --ink:#0E1420; --ink-soft:rgba(14,20,32,.62); --ink-faint:rgba(14,20,32,.40);
-  --bg:#F2F4F8; --paper:#FFFFFF; --line:rgba(14,20,32,.08);
-  --signal:#2650F0; --signal-soft:#E8EDFE;
-  --alert:#D9482B; --ok:#178A50; --ok-soft:#E6F5EC;
-  --opp:#8A6100; --opp-soft:#FFF3D6; --piste:#EDF0F6; --r:16px;
+  --ink:#152A1C; --ink-soft:rgba(21,42,28,.64); --ink-faint:rgba(21,42,28,.42);
+  --bg:#E7F0DE; --paper:#FCFDFA; --line:rgba(21,42,28,.10);
+  --forest:#1D3826; --forest-2:#2A4A31;
+  --sur-forest:#EFF6E8; --sur-forest-soft:rgba(239,246,232,.62);
+  --data:#7DBE45; --data-deep:#3E7D28; --data-soft:#E6F2D8;
+  --lime:#CDE9A5; --piste:#EDF3E2;
+  --alert:#C14E24; --alert-soft:#F8E9E0;
+  --opp:#8A6100; --opp-soft:#F6EFD3; --r:16px;
   --f-display:system-ui,-apple-system,"Segoe UI",sans-serif;
   --f-body:system-ui,-apple-system,"Segoe UI",sans-serif;
   --f-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
 }
 @media(prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --ink:#EEF1F6; --ink-soft:rgba(238,241,246,.62); --ink-faint:rgba(238,241,246,.38);
-  --bg:#0B0D12; --paper:#141821; --line:rgba(255,255,255,.09);
-  --signal:#5B84FF; --signal-soft:rgba(91,132,255,.14);
-  --alert:#F2704F; --ok:#3FC57F; --ok-soft:rgba(63,197,127,.14);
-  --opp:#E0A72E; --opp-soft:rgba(224,167,46,.13); --piste:#1E232E;
+  --ink:#E9F2E3; --ink-soft:rgba(233,242,227,.66); --ink-faint:rgba(233,242,227,.42);
+  --bg:#0C140E; --paper:#151F17; --line:rgba(233,242,227,.09);
+  --forest:#16251B; --forest-2:#23392A;
+  --data:#8FCB57; --data-deep:#A9DA74; --data-soft:rgba(143,203,87,.16);
+  --lime:#B7DC85; --piste:#1E2B20;
+  --alert:#E5764A; --alert-soft:rgba(229,118,74,.14);
+  --opp:#E0A72E; --opp-soft:rgba(224,167,46,.13);
 }}
 :root[data-theme="dark"]{
-  --ink:#EEF1F6; --ink-soft:rgba(238,241,246,.62); --ink-faint:rgba(238,241,246,.38);
-  --bg:#0B0D12; --paper:#141821; --line:rgba(255,255,255,.09);
-  --signal:#5B84FF; --signal-soft:rgba(91,132,255,.14);
-  --alert:#F2704F; --ok:#3FC57F; --ok-soft:rgba(63,197,127,.14);
-  --opp:#E0A72E; --opp-soft:rgba(224,167,46,.13); --piste:#1E232E;
+  --ink:#E9F2E3; --ink-soft:rgba(233,242,227,.66); --ink-faint:rgba(233,242,227,.42);
+  --bg:#0C140E; --paper:#151F17; --line:rgba(233,242,227,.09);
+  --forest:#16251B; --forest-2:#23392A;
+  --data:#8FCB57; --data-deep:#A9DA74; --data-soft:rgba(143,203,87,.16);
+  --lime:#B7DC85; --piste:#1E2B20;
+  --alert:#E5764A; --alert-soft:rgba(229,118,74,.14);
+  --opp:#E0A72E; --opp-soft:rgba(224,167,46,.13);
 }
 body{font-family:var(--f-body); background:var(--bg); color:var(--ink); line-height:1.55;
   -webkit-font-smoothing:antialiased}
-.wrap{max-width:1180px; margin:0 auto; padding:28px 24px 80px}
+.app{display:flex; align-items:flex-start; gap:20px; max-width:1420px; margin:0 auto;
+  padding:16px}
 
-.topbar{display:flex; align-items:center; justify-content:space-between; gap:16px;
-  margin-bottom:26px; flex-wrap:wrap}
-.brand{display:flex; align-items:center; gap:12px}
-.brand__mark{width:38px; height:38px; border-radius:10px; background:var(--ink);
+.side{flex:none; width:226px; position:sticky; top:16px; height:calc(100vh - 32px);
+  min-height:520px; background:var(--forest); color:var(--sur-forest); border-radius:24px;
+  padding:22px 14px 18px; display:flex; flex-direction:column; gap:4px}
+.brand{display:flex; align-items:center; gap:11px; padding:0 8px; margin-bottom:22px}
+.brand__mark{width:36px; height:36px; border-radius:10px; background:rgba(239,246,232,.14);
   display:grid; place-items:center; flex:none}
-.brand__name{font-family:var(--f-display); font-weight:700; font-size:1.15rem; letter-spacing:-.01em}
-.brand__sub{font-size:.78rem; color:var(--ink-soft)}
-.topbar__meta{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+.brand__name{font-family:var(--f-display); font-weight:700; font-size:1.08rem;
+  letter-spacing:-.01em}
+.brand__sub{font-size:.72rem; color:var(--sur-forest-soft)}
+.nav{display:flex; align-items:center; gap:11px; width:100%; border:none; background:none;
+  color:var(--sur-forest-soft); font-family:inherit; font-size:.89rem; font-weight:600;
+  padding:11px 12px; border-radius:12px; cursor:pointer; text-align:left}
+.nav svg{flex:none}
+.nav[aria-selected="true"]{background:var(--forest-2); color:var(--sur-forest)}
+@media(hover:hover){.nav:hover{color:var(--sur-forest)}}
+.nav:focus-visible{outline:3px solid var(--lime); outline-offset:2px}
+.side__sep{flex:1}
+.btn--export{display:flex; align-items:center; justify-content:center; gap:9px; width:100%;
+  background:var(--lime); color:#1D3826; border:none; border-radius:12px; font-family:inherit;
+  font-weight:700; font-size:.85rem; padding:12px; cursor:pointer; transition:transform .15s}
+@media(hover:hover){.btn--export:hover{transform:translateY(-2px)}}
+.btn--export:focus-visible{outline:3px solid var(--sur-forest); outline-offset:2px}
+.side__note{font-size:.72rem; color:var(--sur-forest-soft); padding:13px 8px 0; line-height:1.5}
+.side__note strong{color:var(--sur-forest)}
+
+.main{flex:1; min-width:0; padding:6px 2px 60px}
+.mhead{display:flex; align-items:flex-start; justify-content:space-between; gap:16px;
+  flex-wrap:wrap; margin-bottom:20px}
+.mhead h1{font-family:var(--f-display); font-weight:700; font-size:1.5rem;
+  letter-spacing:-.02em; line-height:1.2}
+.mhead__sub{font-size:.82rem; color:var(--ink-soft); margin-top:3px}
+.chips{display:flex; align-items:center; gap:6px; flex-wrap:wrap}
 .chip{font-size:.78rem; font-weight:600; padding:6px 12px; border-radius:999px;
-  background:var(--paper); border:1px solid var(--line); color:var(--ink)}
-button.chip{cursor:pointer; font-family:inherit}
-button.chip[aria-selected="true"]{background:var(--ink); color:var(--paper); border-color:transparent}
-.chip:focus-visible{outline:3px solid var(--signal); outline-offset:2px}
+  background:var(--paper); border:1px solid var(--line); color:var(--ink); font-family:inherit}
+button.chip{cursor:pointer}
+button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-forest);
+  border-color:transparent}
+.chip:focus-visible{outline:3px solid var(--data-deep); outline-offset:2px}
+.chip--etat{color:var(--ink-soft); font-weight:500; border-style:dashed}
+.print-head{display:none}
 
 .hero{background:var(--paper); border:1px solid var(--line); border-radius:22px;
   padding:30px 32px; display:grid; grid-template-columns:auto 1fr auto; gap:36px;
@@ -323,28 +376,30 @@ button.chip[aria-selected="true"]{background:var(--ink); color:var(--paper); bor
 .gauge{position:relative; width:210px}
 .gauge svg{display:block; width:100%; height:auto}
 .gauge__value{position:absolute; left:0; right:0; top:58%; text-align:center;
-  font-family:var(--f-mono); font-weight:700; font-size:2.9rem; letter-spacing:-.04em; line-height:1}
+  font-family:var(--f-mono); font-weight:700; font-size:2.9rem; letter-spacing:-.04em;
+  line-height:1}
 .gauge__value small{font-size:1.1rem; font-weight:600; color:var(--ink-soft)}
 .eyebrow{font-size:.7rem; font-weight:700; color:var(--ink-faint);
   text-transform:uppercase; letter-spacing:.12em; margin-bottom:10px}
-.hero__mid h1{font-family:var(--f-display); font-weight:700; font-size:1.45rem;
+.hero__mid h2{font-family:var(--f-display); font-weight:700; font-size:1.45rem;
   letter-spacing:-.02em; line-height:1.25; margin-bottom:6px}
 .hero__mid p{color:var(--ink-soft); font-size:.92rem; max-width:50ch}
 .hero__mid p strong{color:var(--ink)}
 .delta{display:inline-flex; align-items:center; gap:5px; font-family:var(--f-mono);
   font-weight:600; font-size:.85rem; border-radius:8px; padding:3px 9px; margin-left:8px}
-.delta--up{color:var(--ok); background:var(--ok-soft)}
-.delta--down{color:var(--alert); background:var(--opp-soft)}
+.delta--up{color:var(--data-deep); background:var(--data-soft)}
+.delta--down{color:var(--alert); background:var(--alert-soft)}
+.delta--flat{color:var(--ink-soft); background:var(--piste)}
 .ruler{margin-top:18px}
 .ruler__track{position:relative; height:26px; border-radius:7px; background:var(--piste)}
 .ruler__ticks{position:absolute; inset:0; border-radius:7px; overflow:hidden;
-  background:repeating-linear-gradient(90deg,rgba(127,140,160,.30) 0 1px,transparent 1px 10%)}
+  background:repeating-linear-gradient(90deg,rgba(120,140,110,.30) 0 1px,transparent 1px 10%)}
 .ruler__fill{position:absolute; top:0; bottom:0; left:0;
-  background:linear-gradient(90deg,#3B63F4,var(--signal)); border-radius:7px 0 0 7px}
-.ruler__goal{position:absolute; top:-6px; bottom:-6px; width:2px; background:var(--ink)}
+  background:linear-gradient(90deg,var(--data),var(--data-deep)); border-radius:7px 0 0 7px}
+.ruler__goal{position:absolute; top:-6px; bottom:-6px; width:2px; background:var(--forest)}
 .ruler__goal span{position:absolute; top:-24px; left:-20px; font-family:var(--f-mono);
-  font-size:.72rem; font-weight:600; white-space:nowrap; background:var(--ink);
-  color:var(--paper); padding:2px 7px; border-radius:6px}
+  font-size:.72rem; font-weight:600; white-space:nowrap; background:var(--forest);
+  color:var(--sur-forest); padding:2px 7px; border-radius:6px}
 .ruler__caption{display:flex; justify-content:space-between; font-size:.78rem;
   color:var(--ink-soft); margin-top:10px; gap:12px; flex-wrap:wrap}
 .ruler__caption strong{color:var(--ink)}
@@ -352,29 +407,35 @@ button.chip[aria-selected="true"]{background:var(--ink); color:var(--paper); bor
 .stat{border-left:2px solid var(--line); padding-left:14px}
 .stat__num{font-family:var(--f-mono); font-weight:700; font-size:1.35rem; letter-spacing:-.02em}
 .stat__lbl{font-size:.76rem; color:var(--ink-soft)}
-.stat--crown .stat__num{color:var(--signal)}
+.stat--crown .stat__num{color:var(--data-deep)}
 
-.mission{border-radius:22px; border:1px solid rgba(138,97,0,.28); background:var(--opp-soft);
+.mission{border-radius:22px; background:var(--forest); color:var(--sur-forest);
   padding:26px 30px; margin-bottom:18px; display:grid; grid-template-columns:1fr auto;
   gap:24px; align-items:center}
 .mission__eyebrow{display:flex; align-items:center; gap:8px; font-size:.72rem; font-weight:700;
-  text-transform:uppercase; letter-spacing:.12em; color:var(--opp); margin-bottom:8px}
-.mission__eyebrow::before{content:""; width:8px; height:8px; border-radius:50%; background:var(--opp)}
+  text-transform:uppercase; letter-spacing:.12em; color:var(--lime); margin-bottom:8px}
+.mission__eyebrow::before{content:""; width:8px; height:8px; border-radius:50%;
+  background:var(--lime)}
 .mission h2{font-family:var(--f-display); font-weight:700; font-size:1.32rem;
   letter-spacing:-.02em; margin-bottom:8px; line-height:1.3}
-.mission p{font-size:.92rem; color:var(--ink-soft); max-width:64ch}
-.mission p strong{color:var(--ink)}
-.mission__side{display:grid; gap:12px; justify-items:end; text-align:right}
-.mission__impact{font-family:var(--f-mono); font-weight:700; font-size:1.6rem; color:var(--opp);
-  line-height:1}
-.mission__impact small{display:block; font-family:var(--f-body); font-weight:600; font-size:.72rem;
-  letter-spacing:.06em; text-transform:uppercase; margin-top:4px; opacity:.85}
+.mission p{font-size:.92rem; color:var(--sur-forest-soft); max-width:64ch}
+.mission p strong{color:var(--sur-forest)}
+.mission__side{display:grid; gap:14px; justify-items:end; text-align:right}
+.mission__impact{font-family:var(--f-mono); font-weight:700; font-size:1.6rem;
+  color:var(--lime); line-height:1}
+.mission__impact small{display:block; font-family:var(--f-body); font-weight:600;
+  font-size:.72rem; letter-spacing:.06em; text-transform:uppercase; margin-top:4px;
+  opacity:.85}
+.mission__acts{display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end}
 .btn{display:inline-flex; align-items:center; gap:8px; border:none; cursor:pointer;
   font-family:var(--f-body); font-weight:700; font-size:.9rem; padding:12px 22px;
   border-radius:12px; transition:transform .15s}
-.btn--primary{background:var(--ink); color:var(--paper)}
+.btn--primary{background:var(--lime); color:#1D3826}
 @media(hover:hover){.btn--primary:hover{transform:translateY(-2px)}}
-.btn:focus-visible{outline:3px solid var(--signal); outline-offset:2px}
+.btn--ghost{background:none; border:1px solid rgba(239,246,232,.35); color:var(--sur-forest);
+  font-family:inherit; font-weight:600; font-size:.82rem; padding:10px 16px;
+  border-radius:10px; cursor:pointer}
+.btn:focus-visible,.btn--ghost:focus-visible{outline:3px solid var(--lime); outline-offset:2px}
 
 .queue{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:18px}
 .queue__card{background:var(--paper); border:1px solid var(--line); border-radius:var(--r);
@@ -386,12 +447,18 @@ button.chip[aria-selected="true"]{background:var(--ink); color:var(--paper); bor
 .queue__rate{font-family:var(--f-mono); font-weight:700; font-size:1.05rem; color:var(--alert);
   white-space:nowrap; flex:none; line-height:1.5}
 .queue__rate--warn{color:var(--opp)}
+.btn--mini{border:1px solid var(--line); background:var(--data-soft); color:var(--data-deep);
+  border-radius:9px; padding:6px 12px; font-family:inherit; font-size:.78rem; font-weight:700;
+  cursor:pointer; margin-top:11px}
+.btn--mini:focus-visible{outline:3px solid var(--data-deep); outline-offset:2px}
 
 .grid{display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:18px}
-.card{background:var(--paper); border:1px solid var(--line); border-radius:22px; padding:24px 26px}
+.card{background:var(--paper); border:1px solid var(--line); border-radius:22px;
+  padding:24px 26px}
 .card__head{display:flex; align-items:baseline; justify-content:space-between; gap:12px;
   margin-bottom:6px}
-.card__head h2{font-family:var(--f-display); font-weight:700; font-size:1.1rem; letter-spacing:-.01em}
+.card__head h2{font-family:var(--f-display); font-weight:700; font-size:1.1rem;
+  letter-spacing:-.01em}
 .card__hint{font-size:.76rem; color:var(--ink-faint); text-align:right}
 .card__lead{font-size:.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:58ch}
 .card__lead strong{color:var(--ink)}
@@ -406,42 +473,43 @@ button.chip[aria-selected="true"]{background:var(--ink); color:var(--paper); bor
 .lb__part{font-family:var(--f-mono); font-weight:700}
 .lb__bar{width:88px; height:7px; border-radius:99px; background:var(--piste); overflow:hidden}
 .lb__bar i{display:block; height:100%; border-radius:99px; background:var(--ink-faint)}
-.lb li.is-you{background:var(--signal-soft); border-bottom-color:transparent}
-.lb li.is-you .lb__dom{color:var(--signal)}
-.lb li.is-you .lb__bar i{background:var(--signal)}
+.lb li.is-you{background:var(--data-soft); border-bottom-color:transparent}
+.lb li.is-you .lb__dom{color:var(--data-deep)}
+.lb li.is-you .lb__bar i{background:var(--data)}
 .lb li.is-chaser .lb__part{color:var(--alert)}
 .lb li.is-chaser .lb__bar i{background:var(--alert)}
-.lb__gap{grid-column:2/-1; font-size:.78rem; color:var(--alert); font-weight:600; margin-top:-4px}
+.lb__gap{grid-column:2/-1; font-size:.78rem; color:var(--alert); font-weight:600;
+  margin-top:-4px}
 
 .st{list-style:none; display:grid; gap:14px}
 .st li h3{font-size:.9rem; font-weight:600; margin-bottom:6px; display:flex;
   justify-content:space-between; gap:12px}
-.st li h3 span{font-family:var(--f-mono); font-weight:700; color:var(--ok)}
+.st li h3 span{font-family:var(--f-mono); font-weight:700; color:var(--data-deep)}
 .st__bar{height:8px; border-radius:99px; background:var(--piste); overflow:hidden}
-.st__bar i{display:block; height:100%; border-radius:99px; background:var(--ok)}
+.st__bar i{display:block; height:100%; border-radius:99px; background:var(--data)}
 
 .engines{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:18px}
-.eng{background:var(--paper); border:1px solid var(--line); border-radius:var(--r); padding:18px 20px}
+.eng{background:var(--paper); border:1px solid var(--line); border-radius:var(--r);
+  padding:18px 20px}
 .eng h3{font-size:.9rem; font-weight:700; margin-bottom:2px}
 .eng__rate{font-family:var(--f-mono); font-weight:700; font-size:1.7rem; letter-spacing:-.03em;
   margin-bottom:8px}
-.eng__bar{height:7px; border-radius:99px; background:var(--piste); overflow:hidden; margin-bottom:10px}
-.eng__bar i{display:block; height:100%; background:var(--signal); border-radius:99px}
+.eng__bar{height:7px; border-radius:99px; background:var(--piste); overflow:hidden;
+  margin-bottom:10px}
+.eng__bar i{display:block; height:100%; background:var(--data); border-radius:99px}
 .eng p{font-size:.79rem; color:var(--ink-soft); line-height:1.5}
 .eng--zero .eng__rate{color:var(--ink-faint)}
 .eng--zero .eng__bar i{background:var(--ink-faint)}
 .eng__tag{display:inline-block; font-size:.68rem; font-weight:700; text-transform:uppercase;
   letter-spacing:.08em; padding:3px 8px; border-radius:6px; margin-top:10px}
 .eng__tag--goal{background:var(--opp-soft); color:var(--opp)}
-.eng__tag--best{background:var(--ok-soft); color:var(--ok)}
+.eng__tag--best{background:var(--data-soft); color:var(--data-deep)}
 
-.foot{display:flex; align-items:center; justify-content:space-between; gap:16px;
-  background:var(--paper); border:1px solid var(--line); border-radius:var(--r);
-  padding:16px 22px; font-size:.84rem; color:var(--ink-soft); flex-wrap:wrap}
-.foot strong{color:var(--ink)}
-.foot__spark{display:flex; align-items:flex-end; gap:3px; height:26px}
-.foot__spark i{width:7px; border-radius:2px; background:var(--signal-soft)}
-.foot__spark i.on{background:var(--signal)}
+svg.curve{display:block; width:100%; height:auto; margin-top:4px}
+.curve__mid{stroke:var(--line); stroke-width:1; stroke-dasharray:3 4}
+.curve__val{font-family:var(--f-mono); font-weight:700; font-size:15px; fill:var(--ink)}
+.curve__cap{display:flex; justify-content:space-between; font-size:.75rem;
+  color:var(--ink-faint); margin-top:6px}
 
 .tw{overflow-x:auto}
 table.d{border-collapse:collapse; width:100%; font-size:.86rem}
@@ -452,7 +520,15 @@ table.d td.n{font-family:var(--f-mono); white-space:nowrap}
 table.d tr:last-child td{border-bottom:none}
 
 [hidden]{display:none!important}
-@media(max-width:960px){
+@media(max-width:1020px){
+  .app{flex-direction:column; gap:14px}
+  .side{position:static; width:100%; height:auto; min-height:0; flex-direction:row;
+    align-items:center; flex-wrap:wrap; border-radius:18px; padding:12px 14px}
+  .brand{margin-bottom:0}
+  .nav{width:auto}
+  .side__sep{display:none}
+  .btn--export{width:auto; margin-left:auto}
+  .side__note{display:none}
   .hero{grid-template-columns:1fr; text-align:center}
   .gauge{margin:0 auto}
   .hero__side{grid-template-columns:repeat(3,1fr); min-width:0}
@@ -461,25 +537,42 @@ table.d tr:last-child td{border-bottom:none}
   .grid,.queue{grid-template-columns:1fr}
   .mission{grid-template-columns:1fr}
   .mission__side{justify-items:start; text-align:left}
+  .mission__acts{justify-content:flex-start}
 }
 @media(max-width:560px){
-  .wrap{padding:18px 14px 60px}
+  .app{padding:10px}
+  .main{padding:4px 0 50px}
   .hero,.mission,.card{padding:20px}
   .engines,.hero__side{grid-template-columns:1fr}
   .lb li{grid-template-columns:22px 1fr auto}
   .lb__bar{display:none}
+}
+@media print{
+  body{background:#fff}
+  .app{display:block; padding:0; max-width:none}
+  .side,.chips,.mission__acts,.btn--mini,button{display:none!important}
+  .print-head{display:flex; align-items:baseline; justify-content:space-between; gap:12px;
+    padding-bottom:14px; margin-bottom:18px; border-bottom:2px solid #1D3826}
+  .print-head strong{font-size:1.1rem}
+  .print-head span{font-size:.8rem; color:#555}
+  .hero,.mission,.card,.eng,.queue__card,.foot{border:1px solid #ccc; break-inside:avoid}
+  .mission{background:#fff; color:#152A1C}
+  .mission p{color:#3d4a40}
+  .mission__eyebrow,.mission__impact{color:#3E7D28}
+  [role="tabpanel"][hidden]{display:block!important}
 }
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 """
 
 JS = """
 (function(){
-  document.querySelectorAll('[data-brief]').forEach(function(b){
+  document.querySelectorAll('[data-copy]').forEach(function(b){
     b.addEventListener('click',function(){
-      var self=this, texte=this.getAttribute('data-brief'), avant=this.textContent;
+      var self=this, texte=this.getAttribute('data-copy'),
+          ok=this.getAttribute('data-ok')||'Copié', avant=this.textContent;
       if(navigator.clipboard&&navigator.clipboard.writeText){
         navigator.clipboard.writeText(texte).then(function(){
-          self.textContent='Brief copié';
+          self.textContent=ok;
           setTimeout(function(){self.textContent=avant;},1800);
         });
       }
@@ -492,6 +585,29 @@ JS = """
       x.setAttribute('aria-selected',actif?'true':'false');
       document.getElementById(x.getAttribute('aria-controls')).hidden=!actif;
     });
+  });});
+  var ex=document.getElementById('exporter');
+  if(ex){ex.addEventListener('click',function(){window.print();});}
+  var per=[].slice.call(document.querySelectorAll('.per'));
+  function filtre(jours){
+    var limite=null;
+    if(jours>0){limite=new Date(); limite.setDate(limite.getDate()-jours);}
+    var visibles=0, total=0;
+    [].slice.call(document.querySelectorAll('[data-date]')).forEach(function(el){
+      var hors=!!(limite&&new Date(el.getAttribute('data-date')+'T12:00:00')<limite);
+      el.hidden=hors;
+      if(el.hasAttribute('data-collecte')){total++; if(!hors){visibles++;}}
+    });
+    var etat=document.getElementById('per-etat');
+    if(etat){
+      etat.textContent=limite
+        ? visibles+' collecte'+(visibles>1?'s':'')+' sur la période'
+        : 'toutes les collectes';
+    }
+  }
+  per.forEach(function(o){o.addEventListener('click',function(){
+    per.forEach(function(x){x.setAttribute('aria-selected',x===o?'true':'false');});
+    filtre(parseInt(o.getAttribute('data-jours'),10));
   });});
 })();
 """
@@ -521,6 +637,48 @@ def _brief(q: dict, d: dict) -> str:
     return "\n".join(lignes)
 
 
+def _prompt_ia(q: dict, d: dict) -> str:
+    """Prompt prêt à coller dans ChatGPT / Claude / Perplexity. Demande de
+    Marion (29/07/2026) : « il faut vraiment être dans un outil d'action, de
+    décision, de mouvement ». Le bouton ne copie pas un constat, il copie un
+    prompt qui embarque les données mesurées ET les principes SEO/GEO, et
+    demande la STRUCTURE de l'article, pas sa rédaction : l'expertise du
+    contenu reste chez l'utilisateur."""
+    occ = d["occupants"].get(q["id"], [])
+    terrain = ("Domaines cités à sa place aujourd'hui : " + ", ".join(occ) + "."
+               if occ else "Aucun domaine ne s'impose sur cette question : terrain libre.")
+    taux = f"{q['taux']:.0f}"
+    return f"""Tu es un rédacteur web senior, spécialiste du SEO et du GEO (la visibilité dans les réponses des IA).
+
+MISSION
+Construis la structure complète d'un article qui doit devenir LA source que les moteurs IA citent pour la question : « {q['texte']} »
+
+CONTEXTE MESURÉ ({d['produit']['nom']}, le {d['date']})
+- Marque à faire citer : {d['client_label']}.
+- Sur cette question, la marque n'apparaît que dans {q['cites']} réponse(s) d'IA sur {q['ok']} testées ({taux} %).
+- {terrain}
+- Impact estimé d'un bon contenu : +{_nb(_impact(q, d['requetes'], d['resume']))} points de visibilité IA globale.
+
+CE QUE TU DOIS PRODUIRE (la structure seulement, pas la rédaction)
+1. Le title SEO et le H1 : la question, formulée comme un humain la pose.
+2. Une réponse directe de 2 à 3 phrases à placer juste sous le H1, autonome et citable telle quelle par une IA.
+3. Le plan H2/H3 complet, avec pour chaque section une ligne sur l'intention à couvrir.
+4. Une FAQ de 4 à 6 questions voisines, avec l'angle de réponse en une ligne.
+5. La liste des chiffres, dates et définitions que l'article devra sourcer.
+
+PRINCIPES SEO À RESPECTER
+- Une page = une intention : ne pas mélanger cette question avec un autre sujet.
+- La question exacte dans le title, le H1 et le premier paragraphe.
+- Hiérarchie Hn stricte, paragraphes courts, listes dès que c'est scannable.
+- Prévoir 2 à 3 liens internes vers des pages sœurs du site.
+
+PRINCIPES GEO À RESPECTER
+- Chaque section doit être auto-suffisante : une IA cite un passage, jamais une page entière.
+- Les passages les plus repris par les IA sont les définitions, les chiffres datés et les réponses directes : en placer dans chaque section.
+- Reprendre les formulations naturelles des utilisateurs, pas le jargon du métier.
+- Terminer par la FAQ : c'est la partie la plus citée par les moteurs de réponse."""
+
+
 def _vue_resultats(d: dict) -> str:
     r = d["resume"]
     taux = r["rate"] or 0
@@ -535,14 +693,21 @@ def _vue_resultats(d: dict) -> str:
     moyen = (sum(impacts) / len(impacts)) if impacts else 0
     contenus = math.ceil(reste / moyen) if moyen > 0.2 else None
 
+    marge = _marge(r)
     if d["delta"] is None:
         badge = ""
         phrase = "Première collecte de ce périmètre : la courbe démarre ici."
+    elif abs(d["delta"]) <= marge:
+        # Dans la marge de fluctuation : ni victoire ni alerte, on le DIT.
+        badge = '<span class="delta delta--flat">≈ stable</span>'
+        phrase = (f"Variation de {_nb(abs(d['delta']))} pt(s) : dans la marge de fluctuation "
+                  f"normale (±{_nb(marge)} pts), ce n'est ni une progression ni un recul.")
     else:
         haut = d["delta"] >= 0
         badge = (f'<span class="delta delta--{"up" if haut else "down"}">'
                  f'{"▲" if haut else "▼"} {_nb(abs(d["delta"]))} pts</span>')
-        phrase = f"{'▲' if haut else '▼'} {_nb(abs(d['delta']))} points depuis la collecte précédente."
+        phrase = (f"{'▲' if haut else '▼'} {_nb(abs(d['delta']))} points depuis la collecte "
+                  f"précédente, au-delà de la marge de ±{_nb(marge)} pts : le mouvement est réel.")
 
     reste_txt = f"<strong>+{reste:.0f} pts restants</strong>"
     if contenus:
@@ -564,14 +729,19 @@ def _vue_resultats(d: dict) -> str:
     </div>
     <div class="mission__side">
       <div class="mission__impact">+{_nb(_impact(cible, d["requetes"], r))} pts<small>impact estimé</small></div>
-      <button class="btn btn--primary" data-brief="{_e(_brief(cible, d))}">Copier le brief</button>
+      <div class="mission__acts">
+        <button class="btn--ghost" data-copy="{_e(_brief(cible, d))}" data-ok="Brief copié">Copier le brief</button>
+        <button class="btn btn--primary" data-copy="{_e(_prompt_ia(cible, d))}" data-ok="Prompt copié, colle-le dans une IA">Copier le prompt d'article</button>
+      </div>
     </div>
   </section>"""
 
     suite = [q for q in trous if cible is None or q["id"] != cible["id"]][:2]
     queue = "".join(
         f'<article class="queue__card"><div class="queue__txt">'
-        f'<h3>{_cite(q["texte"])}</h3><p>{_e(_diagnostic(q))}</p></div>'
+        f'<h3>{_cite(q["texte"])}</h3><p>{_e(_diagnostic(q))}</p>'
+        f'<button class="btn--mini" data-copy="{_e(_prompt_ia(q, d))}" '
+        f'data-ok="Prompt copié">Copier le prompt d\'article</button></div>'
         f'<div class="queue__rate{" queue__rate--warn" if q["taux"] >= 10 else ""}">'
         f'{q["taux"]:.0f} %</div></article>'
         for q in suite
@@ -650,7 +820,7 @@ def _vue_resultats(d: dict) -> str:
       <div class="gauge__value">{taux:.0f}<small>%</small></div>
     </div>
     <div class="hero__mid">
-      <h1>{titre}{badge}</h1>
+      <h2>{titre}{badge}</h2>
       <p class="eyebrow">Visibilité IA</p>
       <p>Mesuré sur <strong>{r['n']} appels</strong>, {len(d['moteurs'])} moteurs. {_e(phrase)}</p>
       <div class="ruler">
@@ -693,10 +863,68 @@ def _vue_resultats(d: dict) -> str:
 
   <div class="engines">{eng}</div>
 
-  <footer class="foot">
-    <div><strong>{_e(_prochaine_collecte())}</strong> Publie aujourd'hui, mesure l'effet ensuite.</div>
-    {spark}
-  </footer>"""
+{_courbe(d, marge)}"""
+
+
+def _courbe(d: dict, marge: float) -> str:
+    """La courbe de visibilité, avec sa bande de fluctuation dessinée.
+
+    C'est la réponse visuelle à la peur du « demain il y aura moins » :
+    la bande matérialise la zone où la mesure peut osciller à effort
+    constant. Un point qui reste dans la bande ne raconte rien ;
+    la tendance de la ligne, si.
+    """
+    serie = d["serie"]
+    if len(serie) < 2:
+        return f"""<section class="card">
+  <div class="card__head"><h2>Courbe de visibilité</h2>
+    <span class="card__hint">un point par jour de collecte</span></div>
+  <p class="card__lead">La courbe se dessine à partir de la deuxième collecte, qui arrive
+  automatiquement. En attendant, le repère qui compte :
+  <strong>la marge de fluctuation de cette mesure est de ±{_nb(marge)} pts.</strong>
+  Une réponse d'IA n'est pas stable : à effort constant, le taux oscille naturellement dans
+  cette bande. Une variation qui reste dedans n'est ni une victoire ni une alerte ; seuls un
+  mouvement qui en sort ou une tendance sur 3-4 collectes sont de vrais signaux.</p>
+</section>"""
+
+    W, H, PAD = 640, 150, 16
+    n = len(serie)
+    xs = [PAD + i * (W - 2 * PAD) / (n - 1) for i in range(n)]
+
+    def y(v: float) -> float:
+        return H - PAD - max(0.0, min(100.0, v)) / 100 * (H - 2 * PAD)
+
+    bande = (" ".join(f"{x:.1f},{y(pt['taux'] + marge):.1f}" for x, pt in zip(xs, serie))
+             + " " + " ".join(f"{x:.1f},{y(pt['taux'] - marge):.1f}"
+                              for x, pt in zip(reversed(xs), list(reversed(serie)))))
+    ligne = " ".join(f"{x:.1f},{y(pt['taux']):.1f}" for x, pt in zip(xs, serie))
+    points = "".join(
+        f'<circle cx="{x:.1f}" cy="{y(pt["taux"]):.1f}" r="{5 if i == n - 1 else 3.5}" '
+        f'fill="var(--data{"-deep" if i == n - 1 else ""})">'
+        f'<title>{_e(pt["date"])} : {pt["taux"]:.0f} %</title></circle>'
+        for i, (x, pt) in enumerate(zip(xs, serie))
+    )
+    dernier = serie[-1]
+    etiquette = (f'<text x="{xs[-1]:.1f}" y="{y(dernier["taux"]) - 12:.1f}" text-anchor="end" '
+                 f'class="curve__val">{dernier["taux"]:.0f} %</text>')
+
+    return f"""<section class="card">
+  <div class="card__head"><h2>Courbe de visibilité</h2>
+    <span class="card__hint">bande grisée : marge de fluctuation ±{_nb(marge)} pts</span></div>
+  <p class="card__lead">Tant que la ligne reste dans sa bande, la mesure est <strong>stable</strong> :
+  l'oscillation est le comportement normal d'une réponse d'IA, pas un recul.
+  Le vrai signal, c'est la tendance sur 3-4 collectes.</p>
+  <svg class="curve" viewBox="0 0 {W} {H}" role="img"
+       aria-label="Courbe du taux de citation avec sa marge de fluctuation">
+    <line x1="{PAD}" y1="{y(50):.1f}" x2="{W - PAD}" y2="{y(50):.1f}" class="curve__mid"/>
+    <polygon points="{bande}" fill="var(--data-soft)"/>
+    <polyline points="{ligne}" fill="none" stroke="var(--data)" stroke-width="2.5"
+              stroke-linecap="round" stroke-linejoin="round"/>
+    {points}{etiquette}
+  </svg>
+  <div class="curve__cap"><span>{_e(serie[0]["date"])}</span>
+    <span>{_e(dernier["date"])}</span></div>
+</section>"""
 
 
 def _vue_requetes(d: dict) -> str:
@@ -743,30 +971,66 @@ def rendu(d: dict) -> str:
                        for c in d["clients"])
         client = f'<select class="chip" aria-label="Client">{opts}</select>'
     else:
-        client = f'<span class="chip">{_e(d["client_label"])}</span>'
+        client = ""
 
-    return f"""<div class="wrap">
-  <header class="topbar">
+    return f"""<div class="app">
+  <aside class="side">
     <div class="brand">
       <div class="brand__mark" aria-hidden="true">
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
           <path d="M2 15 L2 11 M5.2 15 L5.2 8 M8.4 15 L8.4 11 M11.6 15 L11.6 5 M14.8 15 L14.8 11 M18 15 L18 8"
-                stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg>
+                stroke="#EFF6E8" stroke-width="1.8" stroke-linecap="round"/></svg>
       </div>
       <div><div class="brand__name">{_e(p['nom'])}</div>
-        <div class="brand__sub">{_e(d['client_label'])}</div></div>
+        <div class="brand__sub">{_e(p['signature'])}</div></div>
     </div>
-    <div class="topbar__meta">
-      {client}
-      <span class="chip">Collecte #{d['run_id']} · {_e(d['date'])}</span>
-      <button class="chip nav" role="tab" aria-selected="true" aria-controls="v-res">Résultats</button>
-      <button class="chip nav" role="tab" aria-selected="false" aria-controls="v-req">Requêtes</button>
-      <button class="chip nav" role="tab" aria-selected="false" aria-controls="v-col">Collectes</button>
-    </div>
-  </header>
-  <div id="v-res" role="tabpanel">{_vue_resultats(d)}</div>
-  <div id="v-req" role="tabpanel" hidden>{_vue_requetes(d)}</div>
-  <div id="v-col" role="tabpanel" hidden>{_vue_collectes(d)}</div>
+    <button class="nav" role="tab" aria-selected="true" aria-controls="v-res">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M2 13 L2 8 M6 13 L6 3 M10 13 L10 6 M14 13 L14 9"
+              stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+      Vue d'ensemble</button>
+    <button class="nav" role="tab" aria-selected="false" aria-controls="v-req">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <circle cx="7" cy="7" r="4.4" stroke="currentColor" stroke-width="1.7"/>
+        <path d="M10.5 10.5 L14 14" stroke="currentColor" stroke-width="1.7"
+              stroke-linecap="round"/></svg>
+      Requêtes</button>
+    <button class="nav" role="tab" aria-selected="false" aria-controls="v-col">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.7"/>
+        <path d="M8 4.5 L8 8 L10.6 9.6" stroke="currentColor" stroke-width="1.7"
+              stroke-linecap="round"/></svg>
+      Collectes</button>
+    <div class="side__sep"></div>
+    <button class="btn--export" id="exporter">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M8 2 L8 10 M4.8 7 L8 10.2 L11.2 7 M3 13.5 L13 13.5"
+              stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
+              stroke-linejoin="round"/></svg>
+      Exporter le rapport</button>
+    <p class="side__note"><strong>{_e(_prochaine_collecte())}</strong>
+      Publie aujourd'hui, mesure l'effet ensuite.</p>
+  </aside>
+  <main class="main">
+    <div class="print-head"><strong>{_e(p['nom'])} · {_e(d['client_label'])}</strong>
+      <span>Collecte #{d['run_id']} · {_e(d['date'])} · {_e(p['signature'])}</span></div>
+    <header class="mhead">
+      <div><h1>{_e(d['client_label'])}</h1>
+        <p class="mhead__sub">Collecte #{d['run_id']} · {_e(d['date'])} ·
+          {d['resume']['n']} appels</p></div>
+      <div class="chips" role="group" aria-label="Période">
+        {client}
+        <button class="chip per" data-jours="7" aria-selected="false">7 jours</button>
+        <button class="chip per" data-jours="28" aria-selected="false">28 jours</button>
+        <button class="chip per" data-jours="90" aria-selected="false">3 mois</button>
+        <button class="chip per" data-jours="0" aria-selected="true">Tout</button>
+        <span class="chip chip--etat" id="per-etat">toutes les collectes</span>
+      </div>
+    </header>
+    <div id="v-res" role="tabpanel">{_vue_resultats(d)}</div>
+    <div id="v-req" role="tabpanel" hidden>{_vue_requetes(d)}</div>
+    <div id="v-col" role="tabpanel" hidden>{_vue_collectes(d)}</div>
+  </main>
 </div>
 <style>{CSS}</style>
 <script>{JS}</script>"""
