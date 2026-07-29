@@ -30,17 +30,21 @@ def _delta(current: float | None, previous: float | None) -> str:
     return f"  ({diff:+.0f} pts)"
 
 
-def run_summary(conn, run_id: int) -> dict:
+def run_summary(conn, run_id: int, exclure=()) -> dict:
+    """`exclure` : ids des requêtes « en observation », tenues hors des
+    agrégats pour qu'un test de requête ne fasse jamais bouger la série."""
+    exclure = tuple(sorted(exclure))
+    clause = f" AND prompt_id NOT IN ({','.join('?' * len(exclure))})" if exclure else ""
     row = conn.execute(
-        """
+        f"""
         SELECT COUNT(*) AS n,
                SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) AS ok,
                SUM(COALESCE(cited, 0))       AS cited,
                AVG(source_rank)              AS avg_rank,
                AVG(text_position)            AS avg_position
-        FROM responses WHERE run_id = ?
+        FROM responses WHERE run_id = ?{clause}
         """,
-        (run_id,),
+        (run_id, *exclure),
     ).fetchone()
     n, ok = row["n"] or 0, row["ok"] or 0
     return {

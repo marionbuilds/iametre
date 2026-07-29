@@ -27,6 +27,7 @@ import math
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 from . import db
 from .config import ROOT, clients_disponibles, load_client, load_produit
@@ -46,14 +47,24 @@ NOMS_MOTEURS = {
 
 # --------------------------------------------------------------------- données
 
-def _perimetre(conn, run_id: int) -> tuple[int, str]:
-    """Signature d'une collecte : nombre de requêtes + moteurs interrogés.
+def _exclusion(exclure, prefixe: str = "") -> tuple[str, tuple]:
+    """Clause SQL « hors requêtes en observation », composable partout."""
+    if not exclure:
+        return "", ()
+    ids = tuple(sorted(exclure))
+    return f" AND {prefixe}prompt_id NOT IN ({','.join('?' * len(ids))})", ids
+
+
+def _perimetre(conn, run_id: int, exclure=frozenset()) -> tuple[int, str]:
+    """Signature d'une collecte : nombre de requêtes TITULAIRES + moteurs.
     Deux collectes ne sont comparables que si leur périmètre est identique,
-    sinon un « +3 points » ne voudrait strictement rien dire."""
+    sinon un « +3 points » ne voudrait strictement rien dire. Les requêtes en
+    observation sont ignorées : en tester une ne casse pas la comparabilité."""
+    clause, params = _exclusion(exclure)
     r = conn.execute(
-        """SELECT COUNT(DISTINCT prompt_id) p, GROUP_CONCAT(DISTINCT engine_id) e
-           FROM responses WHERE run_id=?""",
-        (run_id,),
+        f"""SELECT COUNT(DISTINCT prompt_id) p, GROUP_CONCAT(DISTINCT engine_id) e
+           FROM responses WHERE run_id=?{clause}""",
+        (run_id, *params),
     ).fetchone()
     return r["p"] or 0, r["e"] or ""
 
@@ -62,7 +73,23 @@ def collecte(conn, run_id: int) -> dict:
     meta = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
     if meta is None:
         raise SystemExit(f"Collecte #{run_id} introuvable.")
-    resume = run_summary(conn, run_id)
+
+    # La config d'abord : elle porte le statut des requêtes (titulaire ou en
+    # observation) et le rival du duel. Sans elle, tout reste titulaire.
+    try:
+        cfg = load_client(meta["client"])
+        etiquette, set_version, n_conc = cfg.label, cfg.set_version, len(cfg.competitors)
+        statuts = {p.id: p.statut for p in cfg.prompts}
+        rival = cfg.rival
+        rival_label = (cfg.competitor_label(rival) or rival) if rival else None
+    except Exception:
+        etiquette, set_version, n_conc = meta["client"], meta["set_version"], 0
+        statuts, rival, rival_label = {}, None, None
+    exclure = frozenset(i for i, s in statuts.items() if s == "observation")
+    cl_r, pr_r = _exclusion(exclure)          # sur `responses` sans alias
+    cl_j, pr_j = _exclusion(exclure, "r.")    # sur les jointures (alias r)
+
+    resume = run_summary(conn, run_id, exclure=exclure)
 
     moteurs = sorted(
         (
@@ -73,20 +100,21 @@ def collecte(conn, run_id: int) -> dict:
                 rang=r["avg_rank"],
             )
             for r in conn.execute(
-                """SELECT engine_id, search_enabled,
+                f"""SELECT engine_id, search_enabled,
                           SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) AS ok,
                           SUM(COALESCE(cited,0)) AS cited, AVG(source_rank) AS avg_rank
-                   FROM responses WHERE run_id=? GROUP BY engine_id""",
-                (run_id,),
+                   FROM responses WHERE run_id=?{cl_r} GROUP BY engine_id""",
+                (run_id, *pr_r),
             ).fetchall()
         ),
         key=lambda m: m["taux"], reverse=True,
     )
 
-    requetes = sorted(
+    toutes = sorted(
         (
             dict(
                 id=r["prompt_id"], texte=r["prompt_text"], type=r["prompt_type"] or "",
+                statut=statuts.get(r["prompt_id"], "titulaire"),
                 ok=r["ok"] or 0, cites=r["cited"] or 0,
                 taux=(r["cited"] or 0) / r["ok"] * 100 if r["ok"] else 0,
             )
@@ -100,27 +128,29 @@ def collecte(conn, run_id: int) -> dict:
         ),
         key=lambda q: q["taux"], reverse=True,
     )
+    requetes = [q for q in toutes if q["statut"] != "observation"]
+    observation = [q for q in toutes if q["statut"] == "observation"]
 
     total = conn.execute(
-        """SELECT COUNT(*) n FROM sources s JOIN responses r ON r.id=s.response_id
-           WHERE r.run_id=? AND s.domain IS NOT NULL AND s.domain <> ''""",
-        (run_id,),
+        f"""SELECT COUNT(*) n FROM sources s JOIN responses r ON r.id=s.response_id
+           WHERE r.run_id=? AND s.domain IS NOT NULL AND s.domain <> ''{cl_j}""",
+        (run_id, *pr_j),
     ).fetchone()["n"] or 1
     distincts = conn.execute(
-        """SELECT COUNT(DISTINCT s.domain) n FROM sources s JOIN responses r ON r.id=s.response_id
-           WHERE r.run_id=? AND s.domain IS NOT NULL AND s.domain <> ''""",
-        (run_id,),
+        f"""SELECT COUNT(DISTINCT s.domain) n FROM sources s JOIN responses r ON r.id=s.response_id
+           WHERE r.run_id=? AND s.domain IS NOT NULL AND s.domain <> ''{cl_j}""",
+        (run_id, *pr_j),
     ).fetchone()["n"]
     voix = [
         dict(domaine=r["domain"], label=r["label"], moi=bool(r["moi"]), n=r["n"],
              part=r["n"] / total * 100, rang=r["rang"])
         for r in conn.execute(
-            """SELECT s.domain, MAX(s.is_target) AS moi, MAX(s.competitor) AS label,
+            f"""SELECT s.domain, MAX(s.is_target) AS moi, MAX(s.competitor) AS label,
                       COUNT(*) AS n, AVG(s.rank) AS rang
                FROM sources s JOIN responses r ON r.id=s.response_id
-               WHERE r.run_id=? AND s.domain IS NOT NULL AND s.domain <> ''
+               WHERE r.run_id=? AND s.domain IS NOT NULL AND s.domain <> ''{cl_j}
                GROUP BY s.domain ORDER BY n DESC LIMIT 8""",
-            (run_id,),
+            (run_id, *pr_j),
         ).fetchall()
     ]
 
@@ -137,18 +167,86 @@ def collecte(conn, run_id: int) -> dict:
         if len(liste) < 4:
             liste.append(r["dom"])
 
+    # Dominance (méthode La WAB) : être cité ne suffit pas. Quand la marque
+    # est citée, est-elle la source n°1 ? Est-elle nommée dans le texte ?
+    dom = conn.execute(
+        f"""SELECT SUM(COALESCE(cited,0)) c,
+               SUM(CASE WHEN COALESCE(cited,0)=1 AND source_rank=1 THEN 1 ELSE 0 END) n1,
+               SUM(COALESCE(cited_in_text,0)) t,
+               SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) ok
+           FROM responses WHERE run_id=?{cl_r}""",
+        (run_id, *pr_r),
+    ).fetchone()
+    dominance = dict(cites=dom["c"] or 0, n1=dom["n1"] or 0,
+                     en_texte=dom["t"] or 0, ok=dom["ok"] or 0)
+    dominance_requetes = sorted(
+        (
+            dict(id=r["prompt_id"], texte=r["texte"], cites=r["c"],
+                 part=r["n1"] / r["c"] * 100 if r["c"] else 0)
+            for r in conn.execute(
+                f"""SELECT prompt_id, MAX(prompt_text) texte,
+                       SUM(COALESCE(cited,0)) c,
+                       SUM(CASE WHEN COALESCE(cited,0)=1 AND source_rank=1
+                           THEN 1 ELSE 0 END) n1
+                   FROM responses WHERE run_id=? AND error IS NULL{cl_r}
+                   GROUP BY prompt_id HAVING SUM(COALESCE(cited,0)) > 0""",
+                (run_id, *pr_r),
+            ).fetchall()
+        ),
+        key=lambda x: (x["part"], x["cites"]), reverse=True,
+    )
+
+    # Alignement au sujet : QUELLES pages du site les IA citent-elles ?
+    # C'est ce qui dit si on est cité pour son offre ou pour un vieux contenu.
+    agg: dict[str, dict] = {}
+    for r in conn.execute(
+        f"""SELECT s.url u, r.prompt_id pid
+           FROM sources s JOIN responses r ON r.id=s.response_id
+           WHERE r.run_id=? AND s.is_target=1 AND s.url IS NOT NULL AND s.url <> ''{cl_j}""",
+        (run_id, *pr_j),
+    ).fetchall():
+        chemin = urlparse(r["u"]).path.rstrip("/") or "/"
+        e = agg.setdefault(chemin, {"n": 0, "reqs": set()})
+        e["n"] += 1
+        e["reqs"].add(r["pid"])
+    pages = sorted(
+        (dict(page=k, n=v["n"], requetes=len(v["reqs"])) for k, v in agg.items()),
+        key=lambda x: x["n"], reverse=True,
+    )[:6]
+
+    # Le duel : la marque contre SON rival direct, requête par requête.
+    duel = []
+    if rival:
+        for r in conn.execute(
+            f"""SELECT prompt_id pid, MAX(prompt_text) texte,
+                   SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) ok,
+                   SUM(COALESCE(cited,0)) moi,
+                   SUM(CASE WHEN error IS NULL AND EXISTS(
+                         SELECT 1 FROM sources s WHERE s.response_id=responses.id
+                           AND (s.domain=? OR s.domain LIKE '%.'||?)
+                       ) THEN 1 ELSE 0 END) lui
+               FROM responses WHERE run_id=?{cl_r} GROUP BY prompt_id""",
+            (rival, rival, run_id, *pr_r),
+        ).fetchall():
+            if r["ok"]:
+                duel.append(dict(id=r["pid"], texte=r["texte"],
+                                 moi=(r["moi"] or 0) / r["ok"] * 100,
+                                 lui=(r["lui"] or 0) / r["ok"] * 100))
+        # Les requêtes où le rival fait mieux d'abord : c'est là qu'on agit.
+        duel.sort(key=lambda x: x["lui"] - x["moi"], reverse=True)
+
     # Comparaison avec la collecte précédente DE MÊME PÉRIMÈTRE uniquement.
-    signature = _perimetre(conn, run_id)
+    signature = _perimetre(conn, run_id, exclure)
     precedent = None
     for r in conn.execute(
         "SELECT id FROM runs WHERE client=? AND id<? ORDER BY id DESC", (meta["client"], run_id)
     ).fetchall():
-        if _perimetre(conn, r["id"]) == signature:
+        if _perimetre(conn, r["id"], exclure) == signature:
             precedent = r["id"]
             break
     delta = None
     if precedent is not None:
-        avant = run_summary(conn, precedent)["rate"]
+        avant = run_summary(conn, precedent, exclure=exclure)["rate"]
         if avant is not None and resume["rate"] is not None:
             delta = resume["rate"] - avant
 
@@ -157,7 +255,7 @@ def collecte(conn, run_id: int) -> dict:
         "SELECT id, started_at, note FROM runs WHERE client=? ORDER BY id DESC LIMIT 25",
         (meta["client"],),
     ).fetchall():
-        s = run_summary(conn, r["id"])
+        s = run_summary(conn, r["id"], exclure=exclure)
         if s["n"]:
             historique.append(dict(id=r["id"], iso=r["started_at"][:10],
                                    date=r["started_at"][:16].replace("T", " à "),
@@ -171,24 +269,20 @@ def collecte(conn, run_id: int) -> dict:
            WHERE client=? GROUP BY DATE(started_at) ORDER BY j""",
         (meta["client"],),
     ).fetchall():
-        if _perimetre(conn, ligne["dernier"]) != signature:
+        if _perimetre(conn, ligne["dernier"], exclure) != signature:
             continue
-        t = run_summary(conn, ligne["dernier"])["rate"]
+        t = run_summary(conn, ligne["dernier"], exclure=exclure)["rate"]
         if t is not None:
             serie.append(dict(date=ligne["j"], taux=t))
-
-    try:
-        cfg = load_client(meta["client"])
-        etiquette, set_version, n_conc = cfg.label, cfg.set_version, len(cfg.competitors)
-    except Exception:
-        etiquette, set_version, n_conc = meta["client"], meta["set_version"], 0
 
     return {
         "run_id": run_id, "client": meta["client"], "client_label": etiquette,
         "clients": clients_disponibles(), "set_version": set_version, "n_concurrents": n_conc,
         "date": meta["started_at"][:10], "resume": resume, "moteurs": moteurs,
-        "requetes": requetes, "voix": voix, "occupants": occupants,
-        "total_citations": total, "domaines_distincts": distincts,
+        "requetes": requetes, "observation": observation, "voix": voix,
+        "occupants": occupants, "total_citations": total, "domaines_distincts": distincts,
+        "dominance": dominance, "dominance_requetes": dominance_requetes,
+        "pages": pages, "duel": duel, "rival": rival, "rival_label": rival_label,
         "historique": historique, "serie": serie, "delta": delta,
         "produit": load_produit(),
     }
@@ -395,6 +489,22 @@ body{font-family:var(--f-body); background:var(--bg); color:var(--ink); line-hei
 .reqattente li button{border:none; background:none; color:var(--ink-faint); cursor:pointer;
   font-size:1rem; line-height:1; padding:2px}
 a.btn--mini{text-decoration:none; display:inline-block; margin-top:0}
+.duel{display:grid}
+.duel__row{display:grid; grid-template-columns:minmax(0,1fr) 250px; gap:16px; align-items:center;
+  padding:11px 0; border-bottom:1px solid var(--line)}
+.duel__row:last-child{border-bottom:none}
+.duel__row>p{font-size:.87rem; font-weight:600}
+.duel__bars{display:grid; gap:5px}
+.duel__bar{display:flex; align-items:center; gap:8px}
+.duel__bar small{font-size:.64rem; font-weight:700; text-transform:uppercase;
+  letter-spacing:.06em; color:var(--ink-faint); width:26px; flex:none}
+.duel__piste{flex:1; height:7px; border-radius:99px; background:var(--h0); overflow:hidden}
+.duel__piste i{display:block; height:100%; border-radius:99px}
+.duel__bar.moi .duel__piste i{background:var(--data)}
+.duel__bar.lui .duel__piste i{background:var(--alert)}
+.duel__bar b{font-family:var(--f-mono); font-size:.74rem; font-weight:700; width:40px;
+  text-align:right; flex:none}
+.obs{margin-top:22px; border-top:1px solid var(--line); padding-top:18px}
 .chips{display:flex; align-items:center; gap:6px; flex-wrap:wrap}
 .chip{font-size:.78rem; font-weight:600; padding:6px 12px; border-radius:999px;
   background:var(--paper); border:1px solid var(--line); color:var(--ink); font-family:inherit}
@@ -916,6 +1026,57 @@ def _vue_resultats(d: dict) -> str:
         if forts else "Aucune requête au-dessus de 60 % pour l'instant."
     )
 
+    # Dominance (La WAB) : être cité ne suffit pas, il faut dominer la réponse.
+    domg = d["dominance"]
+    part_n1 = domg["n1"] / domg["cites"] * 100 if domg["cites"] else 0
+    part_txt = domg["en_texte"] / domg["ok"] * 100 if domg["ok"] else 0
+    dom_l = "".join(
+        f'<li><h3>{_e(x["texte"])} <span>{x["part"]:.0f} %</span></h3>'
+        f'<div class="st__bar"><i style="width:{max(x["part"], 2):.0f}%"></i></div></li>'
+        for x in d["dominance_requetes"][:5]
+    ) or "<li>Aucune citation sur cette collecte.</li>"
+
+    # Alignement au sujet : par quelle porte les IA citent-elles le site ?
+    pages_total = sum(p["n"] for p in d["pages"])
+    pages_l = "".join(
+        f'<tr><td class="fort">{_e(p["page"])}</td><td class="n">{p["n"]}</td>'
+        f'<td class="n">{p["requetes"]}</td></tr>'
+        for p in d["pages"]
+    )
+    lead_pages = (
+        f"<strong>{_e(d['pages'][0]['page'])}</strong> concentre {d['pages'][0]['n']} des "
+        f"{pages_total} citations de tes pages : les IA te citent surtout par cette porte. "
+        f"La page citée dit <strong>pourquoi</strong> on te cite : ton offre, ou un contenu "
+        f"périphérique."
+        if d["pages"] else "Aucune page du site citée sur cette collecte."
+    )
+
+    duel_html = ""
+    if d["duel"]:
+        menees = sum(1 for x in d["duel"] if x["moi"] > x["lui"])
+        perdues = sum(1 for x in d["duel"] if x["lui"] > x["moi"])
+        egales = len(d["duel"]) - menees - perdues
+        lignes_duel = "".join(
+            f'<div class="duel__row"><p>{_cite(x["texte"])}</p>'
+            f'<div class="duel__bars">'
+            f'<span class="duel__bar moi"><small>Toi</small>'
+            f'<span class="duel__piste"><i style="width:{x["moi"]:.0f}%"></i></span>'
+            f'<b>{x["moi"]:.0f} %</b></span>'
+            f'<span class="duel__bar lui"><small>Lui</small>'
+            f'<span class="duel__piste"><i style="width:{x["lui"]:.0f}%"></i></span>'
+            f'<b>{x["lui"]:.0f} %</b></span>'
+            f'</div></div>'
+            for x in d["duel"][:8]
+        )
+        duel_html = f"""
+  <section class="card">
+    <div class="card__head"><h2>Duel : toi contre {_e(d["rival_label"])}</h2>
+      <span class="card__hint">{menees} menées · {perdues} à reprendre · {egales} égalités</span></div>
+    <p class="card__lead">Ton concurrent éditorial direct, requête par requête, du duel le plus
+    disputé au plus tranquille. <strong>Vert : toi. Ambre : lui.</strong></p>
+    <div class="duel">{lignes_duel}</div>
+  </section>"""
+
     return f"""
   <section class="hero">
     <div class="gauge">
@@ -970,6 +1131,27 @@ def _vue_resultats(d: dict) -> str:
       <ul class="st">{st}</ul>
     </section>
   </div>
+
+  <div class="grid">
+    <section class="card">
+      <div class="card__head"><h2>Dominance</h2>
+        <span class="card__hint">source n°1, pas juste citée</span></div>
+      <p class="card__lead">Être citée ne suffit pas. Quand la marque apparaît, elle est
+      <strong>source n°1 dans {part_n1:.0f} % des cas</strong>, et nommée dans le texte même
+      de la réponse dans {part_txt:.0f} % des appels. C'est la prochaine frontière une fois
+      la citation acquise.</p>
+      <ul class="st">{dom_l}</ul>
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>Ce que les IA citent chez toi</h2>
+        <span class="card__hint">alignement au sujet</span></div>
+      <p class="card__lead">{lead_pages}</p>
+      <div class="tw"><table class="d">
+        <tr><th>Page</th><th>Citations</th><th>Requêtes</th></tr>
+        {pages_l}</table></div>
+    </section>
+  </div>
+{duel_html}
 
   <div class="engines">{eng}</div>
 
@@ -1044,13 +1226,33 @@ def _vue_requetes(d: dict) -> str:
         f'<td class="n">{q["cites"]}/{q["ok"]}</td></tr>'
         for q in sorted(d["requetes"], key=lambda x: x["id"])
     )
+    obs_html = ""
+    if d["observation"]:
+        lignes_obs = "".join(
+            f'<tr><td>{_e(q["texte"])}</td><td class="n">{_e(q["id"])}</td>'
+            f'<td class="n">{q["taux"]:.0f} %</td>'
+            f'<td class="n">{q["cites"]}/{q["ok"]}</td></tr>'
+            for q in sorted(d["observation"], key=lambda x: x["id"])
+        )
+        obs_html = f"""
+  <div class="obs">
+    <div class="card__head"><h2>En observation</h2>
+      <span class="card__hint">hors taux global</span></div>
+    <p class="card__lead">Ces requêtes sont collectées et mesurées, mais n'entrent ni dans le
+    taux global ni dans le périmètre de comparaison : on peut les <strong>tester sans faire
+    bouger la série</strong>. Bonnes sur 2-3 collectes, elles sont promues titulaires.</p>
+    <div class="tw"><table class="d">
+    <tr><th>Requête</th><th>Réf.</th><th>Citation</th><th>Ratio</th></tr>
+    {lignes_obs}</table></div>
+  </div>"""
     return f"""<section class="card">
   <div class="card__head"><h2>Jeu de requêtes</h2>
     <span class="card__hint">version {d['set_version']} · {len(d['requetes'])} requêtes ·
     {d['n_concurrents']} concurrents suivis</span></div>
   <p class="card__lead">Une requête est une question posée comme un humain la pose, pas un mot-clé.
-  <strong>Ajouter une requête est sans danger ; en modifier une casse la comparabilité de la
-  série.</strong></p>
+  <strong>Ajouter une requête est sans danger : elle démarre « en observation », collectée mais
+  hors taux global, le temps de la valider.</strong> En modifier une casse la comparabilité :
+  on n'y touche jamais, on en crée une nouvelle.</p>
   <div class="reqform">
     <input id="req-champ" type="text" maxlength="180"
            placeholder="Proposer une requête, formulée comme on la poserait à une IA…"
@@ -1066,7 +1268,7 @@ def _vue_requetes(d: dict) -> str:
   </div>
   <div class="tw"><table class="d">
   <tr><th>Requête</th><th>Réf.</th><th>Type</th><th>Citation</th><th>Ratio</th></tr>
-  {lignes}</table></div></section>"""
+  {lignes}</table></div>{obs_html}</section>"""
 
 
 def _vue_collectes(d: dict) -> str:

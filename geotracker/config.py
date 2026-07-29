@@ -32,6 +32,10 @@ class Prompt:
     id: str
     text: str
     type: str = "inconnue"
+    # "titulaire" : compte dans le taux global. "observation" : collectée et
+    # affichée à part, mais EXCLUE des agrégats tant qu'elle n'est pas promue.
+    # C'est ce qui permet de tester une requête sans plomber la série.
+    statut: str = "titulaire"
 
 
 @dataclass
@@ -71,6 +75,8 @@ class ClientConfig:
     engines: list[Engine]
     repetitions: int
     repetitions_ai_overview: int
+    # LE concurrent direct à battre : alimente la vue « Duel » du dashboard.
+    rival: str | None = None
     path: Path = field(default=None, repr=False)
 
     def competitor_label(self, domain: str) -> str | None:
@@ -117,7 +123,8 @@ def load_client(name: str) -> ClientConfig:
         )
 
     prompts = [
-        Prompt(id=p["id"], text=p["text"], type=p.get("type", "inconnue"))
+        Prompt(id=p["id"], text=p["text"], type=p.get("type", "inconnue"),
+               statut=p.get("statut", "titulaire"))
         for p in raw.get("prompts", [])
     ]
 
@@ -135,6 +142,7 @@ def load_client(name: str) -> ClientConfig:
         brand_terms=raw["target"].get("brand_terms", []),
         competitors=raw.get("competitors", []),
         prompts=prompts,
+        rival=raw.get("rival"),
         engines=engines,
         repetitions=int(sampling.get("repetitions", 5)),
         repetitions_ai_overview=int(sampling.get("repetitions_ai_overview", 3)),
