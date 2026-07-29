@@ -1,33 +1,31 @@
-"""Génère l'interface du produit à partir des données collectées.
+"""Génère l'interface d'IAmètre à partir des données collectées.
 
-    python -m geotracker.dashboard              # dernier run
+    python -m geotracker.dashboard              # dernière collecte
     python -m geotracker.dashboard --run 13
 
-Le fichier produit est autonome : aucun script ni police externe. Il s'ouvre
-d'un double-clic, fonctionne hors ligne, et se régénère à chaque collecte.
+Le fichier produit s'ouvre d'un double-clic et se régénère à chaque collecte.
 
-Trois vues, qui suivent le parcours d'un utilisateur :
-  Résultats  ce que la collecte a mesuré
-  Requêtes   ce qui est suivi, et comment on en ajoute
-  Collectes  l'historique des exécutions
+PRINCIPE DE L'ÉCRAN (design validé par Marion le 29/07/2026)
+Ce n'est pas un rapport, c'est un poste de pilotage. L'écran raconte cinq
+actes : où j'en suis → quoi faire maintenant → qui me menace → ce qui marche
+→ où on me trouve. Une seule action est mise en avant et tout le reste reste
+sobre : trois sujets présentés à égalité, c'est zéro article écrit.
 
-Direction artistique (CLAUDE.md §4 du front) : blanc épuré, minimaliste, type
-Apple, futuriste. **Interface monochrome, la couleur n'apparaît QUE dans les
-données** : c'est ce qui rend le produit rebrandable pour un client. Palette de
-données validée (luminosité, chroma, séparation daltonisme, contraste), en clair
-comme en sombre.
-
-Les textes sont écrits du point de vue d'un utilisateur quelconque, jamais de
-Marion : « la marque », pas « toi ». C'est ce qui sépare un rapport personnel
-d'un produit.
+⚠️ RÈGLE ABSOLUE : aucun chiffre inventé.
+La maquette d'origine affichait une variation, une série de collectes et un
+impact estimé qui étaient des remplissages. Ici chaque valeur est calculée
+depuis la base, et **tout indicateur sans données est masqué** plutôt
+qu'inventé. Un instrument de mesure qui affiche un faux chiffre ne vaut rien,
+et c'est encore plus vrai le jour où on le montre en entretien.
 """
 
 from __future__ import annotations
 
 import argparse
 import html
+import math
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import db
@@ -35,34 +33,42 @@ from .config import ROOT, clients_disponibles, load_client, load_produit
 from .report import run_summary
 
 SORTIE = ROOT / "reports" / "dashboard.html"
-
-# Seuil sous lequel une requête est traitée comme un trou de contenu. Toujours
-# doublé d'un libellé écrit : la couleur ne porte jamais seule une information.
 SEUIL_TROU = 25.0
 
 NOMS_MOTEURS = {
     "openai": "ChatGPT",
     "perplexity": "Perplexity",
     "anthropic": "Claude",
-    "anthropic-memory": "Claude, mémoire de marque",
+    "anthropic-memory": "Claude · mémoire de marque",
     "ai_overview": "Google AI Overviews",
 }
 
 
 # --------------------------------------------------------------------- données
 
+def _perimetre(conn, run_id: int) -> tuple[int, str]:
+    """Signature d'une collecte : nombre de requêtes + moteurs interrogés.
+    Deux collectes ne sont comparables que si leur périmètre est identique,
+    sinon un « +3 points » ne voudrait strictement rien dire."""
+    r = conn.execute(
+        """SELECT COUNT(DISTINCT prompt_id) p, GROUP_CONCAT(DISTINCT engine_id) e
+           FROM responses WHERE run_id=?""",
+        (run_id,),
+    ).fetchone()
+    return r["p"] or 0, r["e"] or ""
+
+
 def collecte(conn, run_id: int) -> dict:
     meta = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
     if meta is None:
-        raise SystemExit(f"Run #{run_id} introuvable.")
+        raise SystemExit(f"Collecte #{run_id} introuvable.")
+    resume = run_summary(conn, run_id)
 
     moteurs = sorted(
         (
             dict(
-                id=r["engine_id"],
-                recherche=bool(r["search_enabled"]),
-                ok=r["ok"] or 0,
-                cites=r["cited"] or 0,
+                id=r["engine_id"], recherche=bool(r["search_enabled"]),
+                ok=r["ok"] or 0, cites=r["cited"] or 0,
                 taux=(r["cited"] or 0) / r["ok"] * 100 if r["ok"] else 0,
                 rang=r["avg_rank"],
             )
@@ -74,18 +80,14 @@ def collecte(conn, run_id: int) -> dict:
                 (run_id,),
             ).fetchall()
         ),
-        key=lambda m: m["taux"],
-        reverse=True,
+        key=lambda m: m["taux"], reverse=True,
     )
 
     requetes = sorted(
         (
             dict(
-                id=r["prompt_id"],
-                texte=r["prompt_text"],
-                type=r["prompt_type"] or "",
-                ok=r["ok"] or 0,
-                cites=r["cited"] or 0,
+                id=r["prompt_id"], texte=r["prompt_text"], type=r["prompt_type"] or "",
+                ok=r["ok"] or 0, cites=r["cited"] or 0,
                 taux=(r["cited"] or 0) / r["ok"] * 100 if r["ok"] else 0,
             )
             for r in conn.execute(
@@ -96,631 +98,664 @@ def collecte(conn, run_id: int) -> dict:
                 (run_id,),
             ).fetchall()
         ),
-        key=lambda q: q["taux"],
-        reverse=True,
+        key=lambda q: q["taux"], reverse=True,
     )
 
-    # ⚠️ Le dénominateur de la part de voix couvre TOUS les domaines cités, pas
-    # seulement ceux qu'on affiche, sinon la part est gonflée par la troncature.
     total = conn.execute(
-        """SELECT COUNT(*) n FROM sources s JOIN responses r ON r.id = s.response_id
+        """SELECT COUNT(*) n FROM sources s JOIN responses r ON r.id=s.response_id
            WHERE r.run_id=? AND s.domain IS NOT NULL AND s.domain <> ''""",
         (run_id,),
     ).fetchone()["n"] or 1
     distincts = conn.execute(
-        """SELECT COUNT(DISTINCT s.domain) n FROM sources s
-           JOIN responses r ON r.id = s.response_id
+        """SELECT COUNT(DISTINCT s.domain) n FROM sources s JOIN responses r ON r.id=s.response_id
            WHERE r.run_id=? AND s.domain IS NOT NULL AND s.domain <> ''""",
         (run_id,),
     ).fetchone()["n"]
     voix = [
-        dict(
-            domaine=r["domain"],
-            label=r["label"],
-            moi=bool(r["moi"]),
-            n=r["n"],
-            part=r["n"] / total * 100,
-            rang=r["rang"],
-        )
+        dict(domaine=r["domain"], label=r["label"], moi=bool(r["moi"]), n=r["n"],
+             part=r["n"] / total * 100, rang=r["rang"])
         for r in conn.execute(
             """SELECT s.domain, MAX(s.is_target) AS moi, MAX(s.competitor) AS label,
                       COUNT(*) AS n, AVG(s.rank) AS rang
-               FROM sources s JOIN responses r ON r.id = s.response_id
+               FROM sources s JOIN responses r ON r.id=s.response_id
                WHERE r.run_id=? AND s.domain IS NOT NULL AND s.domain <> ''
-               GROUP BY s.domain ORDER BY n DESC LIMIT 12""",
+               GROUP BY s.domain ORDER BY n DESC LIMIT 8""",
             (run_id,),
         ).fetchall()
     ]
 
-    # Matrice requête × moteur : une forme de lecture que les barres ne donnent
-    # pas. On voit d'un coup d'œil quel moteur est aveugle sur quel sujet.
-    matrice = {}
+    # Qui occupe le terrain sur chaque requête : la matière première du brief.
+    occupants: dict[str, list[str]] = {}
     for r in conn.execute(
-        """SELECT prompt_id, engine_id,
-                  SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) AS ok,
-                  SUM(COALESCE(cited,0)) AS cited
-           FROM responses WHERE run_id=? GROUP BY prompt_id, engine_id""",
+        """SELECT r.prompt_id AS pid, s.domain AS dom, COUNT(*) n
+           FROM sources s JOIN responses r ON r.id=s.response_id
+           WHERE r.run_id=? AND s.is_target=0 AND s.domain IS NOT NULL AND s.domain <> ''
+           GROUP BY r.prompt_id, s.domain ORDER BY n DESC""",
         (run_id,),
     ).fetchall():
-        matrice[(r["prompt_id"], r["engine_id"])] = (
-            (r["cited"] or 0) / r["ok"] * 100 if r["ok"] else None
-        )
+        liste = occupants.setdefault(r["pid"], [])
+        if len(liste) < 4:
+            liste.append(r["dom"])
+
+    # Comparaison avec la collecte précédente DE MÊME PÉRIMÈTRE uniquement.
+    signature = _perimetre(conn, run_id)
+    precedent = None
+    for r in conn.execute(
+        "SELECT id FROM runs WHERE client=? AND id<? ORDER BY id DESC", (meta["client"], run_id)
+    ).fetchall():
+        if _perimetre(conn, r["id"]) == signature:
+            precedent = r["id"]
+            break
+    delta = None
+    if precedent is not None:
+        avant = run_summary(conn, precedent)["rate"]
+        if avant is not None and resume["rate"] is not None:
+            delta = resume["rate"] - avant
 
     historique = []
     for r in conn.execute(
-        """SELECT id, started_at, note FROM runs WHERE client=? ORDER BY id DESC LIMIT 25""",
+        "SELECT id, started_at, note FROM runs WHERE client=? ORDER BY id DESC LIMIT 25",
         (meta["client"],),
     ).fetchall():
         s = run_summary(conn, r["id"])
         if s["n"]:
-            historique.append(
-                dict(id=r["id"], date=r["started_at"][:16].replace("T", " à "),
-                     note=r["note"] or "", n=s["n"], erreurs=s["errors"], taux=s["rate"])
-            )
+            historique.append(dict(id=r["id"], date=r["started_at"][:16].replace("T", " à "),
+                                   note=r["note"] or "", n=s["n"], erreurs=s["errors"],
+                                   taux=s["rate"]))
 
-    # La courbe se compte en JOURS de mesure, pas en runs : plusieurs runs de
-    # mise au point le même jour ne font qu'un seul point de série.
+    # Série : un point par JOUR, et seulement les collectes de même périmètre.
     serie = []
     for ligne in conn.execute(
         """SELECT DATE(started_at) j, MAX(id) dernier FROM runs
            WHERE client=? GROUP BY DATE(started_at) ORDER BY j""",
         (meta["client"],),
     ).fetchall():
-        taux = run_summary(conn, ligne["dernier"])["rate"]
-        if taux is not None:
-            serie.append(dict(date=ligne["j"], taux=taux))
+        if _perimetre(conn, ligne["dernier"]) != signature:
+            continue
+        t = run_summary(conn, ligne["dernier"])["rate"]
+        if t is not None:
+            serie.append(dict(date=ligne["j"], taux=t))
 
     try:
         cfg = load_client(meta["client"])
-        etiquette = cfg.label
-        set_version = cfg.set_version
-        n_concurrents = len(cfg.competitors)
+        etiquette, set_version, n_conc = cfg.label, cfg.set_version, len(cfg.competitors)
     except Exception:
-        etiquette, set_version, n_concurrents = meta["client"], meta["set_version"], 0
+        etiquette, set_version, n_conc = meta["client"], meta["set_version"], 0
 
     return {
-        "run_id": run_id,
-        "client": meta["client"],
-        "client_label": etiquette,
-        "clients": clients_disponibles(),
-        "set_version": set_version,
-        "n_concurrents": n_concurrents,
-        "date": meta["started_at"][:10],
-        "resume": run_summary(conn, run_id),
-        "moteurs": moteurs,
-        "requetes": requetes,
-        "matrice": matrice,
-        "voix": voix,
-        "total_citations": total,
-        "domaines_distincts": distincts,
-        "historique": historique,
-        "serie": serie,
+        "run_id": run_id, "client": meta["client"], "client_label": etiquette,
+        "clients": clients_disponibles(), "set_version": set_version, "n_concurrents": n_conc,
+        "date": meta["started_at"][:10], "resume": resume, "moteurs": moteurs,
+        "requetes": requetes, "voix": voix, "occupants": occupants,
+        "total_citations": total, "domaines_distincts": distincts,
+        "historique": historique, "serie": serie, "delta": delta,
         "produit": load_produit(),
     }
 
 
-# ----------------------------------------------------------------------- rendu
+# -------------------------------------------------------------------- calculs
+
+def _impact(q: dict, requetes: list[dict], resume: dict) -> float:
+    """Combien de points de taux global gagnerait-on si cette requête passait
+    au niveau de celles qui fonctionnent déjà ?
+
+    Calcul vérifiable : la cible est la MÉDIANE des requêtes au-dessus du
+    seuil (un niveau déjà atteint ailleurs, pas un idéal à 100 %), et on
+    mesure ce que ça déplace sur l'ensemble des appels réussis.
+    """
+    bonnes = sorted(x["taux"] for x in requetes if x["taux"] >= SEUIL_TROU)
+    if not bonnes or not resume["ok"]:
+        return 0.0
+    cible = bonnes[len(bonnes) // 2]
+    gagnees = max(0.0, (cible - q["taux"]) / 100 * q["ok"])
+    return gagnees / resume["ok"] * 100
+
+
+def _objectif(taux: float) -> tuple[int, float]:
+    palier = min(100, (int(taux // 10) + 1) * 10)
+    return palier, palier - taux
+
+
+def _lecture_moteur(m: dict, tous: list[dict]) -> str:
+    """Le chiffre seul ne dit rien : on écrit ce qu'il faut en comprendre."""
+    if not m["recherche"]:
+        return ("Le modèle ne connaît pas encore la marque sans aller chercher."
+                if m["taux"] < 5 else "Le modèle commence à connaître la marque de mémoire.")
+    avec = [x for x in tous if x["recherche"]]
+    if not avec:
+        return ""
+    meilleur, pire = max(x["taux"] for x in avec), min(x["taux"] for x in avec)
+    rangs = [x["rang"] for x in avec if x["rang"]]
+    if m["taux"] >= meilleur:
+        return ("Le moteur le plus favorable, et de loin." if meilleur - pire > 20
+                else "Le moteur le plus favorable.")
+    if m["rang"] and rangs and m["rang"] <= min(rangs):
+        return "Le plus dur à percer, mais la meilleure place quand la marque y est."
+    if m["taux"] <= pire:
+        return "Le plus difficile à percer."
+    return f"Bien placée quand la marque y est, rang {m['rang']:.1f}." if m["rang"] else ""
+
+
+def _diagnostic(q: dict) -> str:
+    """Un pourcentage ne fait rien ressentir. « 1 réponse sur 14 », si."""
+    if q["taux"] < 1:
+        return "Aucun domaine ne s'impose : personne n'est cité parce qu'il n'y a rien à citer."
+    sur = max(2, round(q["ok"] / max(q["cites"], 1)))
+    if q["taux"] < 10:
+        return f"La question est posée, mais la marque n'apparaît que dans 1 réponse sur {sur}."
+    return f"Sujet au cœur de l'offre, et la marque n'apparaît que dans 1 réponse sur {sur}."
+
+
+def _prochaine_collecte() -> str:
+    """Le cron tourne le lundi à 06h00 UTC (.github/workflows/weekly.yml)."""
+    maintenant = datetime.now(timezone.utc)
+    jours = (7 - maintenant.weekday()) % 7 or 7
+    return ("Prochaine collecte demain, lundi." if jours == 1
+            else f"Prochaine collecte dans {jours} jours, lundi.")
+
+
+# ---------------------------------------------------------------------- rendu
 
 def _e(v) -> str:
     return html.escape(str(v), quote=True)
 
 
-def _barre(largeur: float, couleur: str, valeur: str, tip: str, etiquette: str = "") -> str:
-    marque = f'<span class="etiq">{_e(etiquette)}</span>' if etiquette else ""
-    return (
-        f'<div class="piste" tabindex="0" data-tip="{_e(tip)}">'
-        f'<div class="barre {couleur}" style="width:{max(largeur, 0.6):.1f}%"></div>'
-        f'<span class="val">{_e(valeur)}{marque}</span></div>'
-    )
-
-
 CSS = """
-*,*::before,*::after{box-sizing:border-box}
+*{margin:0;padding:0;box-sizing:border-box}
 :root{
-  color-scheme:light;
-  --fond:#f4f6f9;
-  --verre:rgba(255,255,255,.72);
-  --verre-haut:rgba(255,255,255,.86);
-  --bord:rgba(9,14,24,.08);
-  --ink:#0a0d12; --ink-2:#59606b; --ink-3:#98a0ac;
-  --data:#2a78d6; --gap:#d03b3b; --neutre:#c4cbd4;
-  --ombre:0 1px 2px rgba(9,14,24,.04), 0 10px 30px -12px rgba(9,14,24,.16);
-  --ombre-h:0 1px 2px rgba(9,14,24,.05), 0 18px 44px -14px rgba(9,14,24,.22);
-  --h0:#eaf1fb; --h1:#cde2fb; --h2:#9ec5f4; --h3:#5598e7; --h4:#2a78d6; --h5:#184f95;
+  --ink:#0E1420; --ink-soft:rgba(14,20,32,.62); --ink-faint:rgba(14,20,32,.40);
+  --bg:#F2F4F8; --paper:#FFFFFF; --line:rgba(14,20,32,.08);
+  --signal:#2650F0; --signal-soft:#E8EDFE;
+  --alert:#D9482B; --ok:#178A50; --ok-soft:#E6F5EC;
+  --opp:#8A6100; --opp-soft:#FFF3D6; --piste:#EDF0F6; --r:16px;
+  --f-display:"Space Grotesk",system-ui,-apple-system,sans-serif;
+  --f-body:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
 }
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  color-scheme:dark;
-  --fond:#08090c;
-  --verre:rgba(28,31,38,.62); --verre-haut:rgba(36,40,48,.78);
-  --bord:rgba(255,255,255,.09);
-  --ink:#f2f4f8; --ink-2:#a2aab6; --ink-3:#6b7482;
-  --data:#3987e5; --gap:#e05a5a; --neutre:#39404b;
-  --ombre:0 1px 2px rgba(0,0,0,.4), 0 10px 30px -12px rgba(0,0,0,.6);
-  --ombre-h:0 1px 2px rgba(0,0,0,.5), 0 18px 44px -14px rgba(0,0,0,.7);
-  --h0:#151a24; --h1:#16304f; --h2:#1c4a7d; --h3:#2568ac; --h4:#3987e5; --h5:#79b2f0;
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --ink:#EEF1F6; --ink-soft:rgba(238,241,246,.62); --ink-faint:rgba(238,241,246,.38);
+  --bg:#0B0D12; --paper:#141821; --line:rgba(255,255,255,.09);
+  --signal:#5B84FF; --signal-soft:rgba(91,132,255,.14);
+  --alert:#F2704F; --ok:#3FC57F; --ok-soft:rgba(63,197,127,.14);
+  --opp:#E0A72E; --opp-soft:rgba(224,167,46,.13); --piste:#1E232E;
 }}
 :root[data-theme="dark"]{
-  color-scheme:dark;
-  --fond:#08090c;
-  --verre:rgba(28,31,38,.62); --verre-haut:rgba(36,40,48,.78);
-  --bord:rgba(255,255,255,.09);
-  --ink:#f2f4f8; --ink-2:#a2aab6; --ink-3:#6b7482;
-  --data:#3987e5; --gap:#e05a5a; --neutre:#39404b;
-  --ombre:0 1px 2px rgba(0,0,0,.4), 0 10px 30px -12px rgba(0,0,0,.6);
-  --ombre-h:0 1px 2px rgba(0,0,0,.5), 0 18px 44px -14px rgba(0,0,0,.7);
-  --h0:#151a24; --h1:#16304f; --h2:#1c4a7d; --h3:#2568ac; --h4:#3987e5; --h5:#79b2f0;
+  --ink:#EEF1F6; --ink-soft:rgba(238,241,246,.62); --ink-faint:rgba(238,241,246,.38);
+  --bg:#0B0D12; --paper:#141821; --line:rgba(255,255,255,.09);
+  --signal:#5B84FF; --signal-soft:rgba(91,132,255,.14);
+  --alert:#F2704F; --ok:#3FC57F; --ok-soft:rgba(63,197,127,.14);
+  --opp:#E0A72E; --opp-soft:rgba(224,167,46,.13); --piste:#1E232E;
 }
+body{font-family:var(--f-body); background:var(--bg); color:var(--ink); line-height:1.55;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px; margin:0 auto; padding:28px 24px 80px}
 
-body{margin:0; background:var(--fond); color:var(--ink); min-height:100vh;
-  font-family:system-ui,-apple-system,"Segoe UI",sans-serif; font-size:14px;
-  line-height:1.5; -webkit-font-smoothing:antialiased}
-/* Lueur ambiante tres faible : c'est elle qui donne au verre depoli quelque
-   chose a flouter. Sans elle, l'effet de matiere n'existe pas. */
-body::before{content:""; position:fixed; inset:-25%; z-index:0; pointer-events:none;
-  background:
-    radial-gradient(38% 38% at 16% 10%, rgba(42,120,214,.16), transparent 70%),
-    radial-gradient(34% 34% at 86% 6%, rgba(28,170,190,.12), transparent 70%),
-    radial-gradient(44% 38% at 66% 96%, rgba(42,120,214,.10), transparent 70%);
-  filter:blur(30px)}
+.topbar{display:flex; align-items:center; justify-content:space-between; gap:16px;
+  margin-bottom:26px; flex-wrap:wrap}
+.brand{display:flex; align-items:center; gap:12px}
+.brand__mark{width:38px; height:38px; border-radius:10px; background:var(--ink);
+  display:grid; place-items:center; flex:none}
+.brand__name{font-family:var(--f-display); font-weight:700; font-size:1.15rem; letter-spacing:-.01em}
+.brand__sub{font-size:.78rem; color:var(--ink-soft)}
+.topbar__meta{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+.chip{font-size:.78rem; font-weight:600; padding:6px 12px; border-radius:999px;
+  background:var(--paper); border:1px solid var(--line); color:var(--ink)}
+button.chip{cursor:pointer; font-family:inherit}
+button.chip[aria-selected="true"]{background:var(--ink); color:var(--paper); border-color:transparent}
+.chip:focus-visible{outline:3px solid var(--signal); outline-offset:2px}
 
-.app{position:relative; z-index:1; display:grid;
-  grid-template-columns:236px minmax(0,1fr); min-height:100vh}
+.hero{background:var(--paper); border:1px solid var(--line); border-radius:22px;
+  padding:30px 32px; display:grid; grid-template-columns:auto 1fr auto; gap:36px;
+  align-items:center; margin-bottom:18px}
+.gauge{position:relative; width:210px}
+.gauge svg{display:block; width:100%; height:auto}
+.gauge__value{position:absolute; left:0; right:0; top:56%; text-align:center;
+  font-family:var(--f-mono); font-weight:700; font-size:2.9rem; letter-spacing:-.04em; line-height:1}
+.gauge__value small{font-size:1.1rem; font-weight:600; color:var(--ink-soft)}
+.gauge__label{position:absolute; left:0; right:0; top:82%; text-align:center; font-size:.72rem;
+  font-weight:600; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.1em}
+.hero__mid h1{font-family:var(--f-display); font-weight:700; font-size:1.45rem;
+  letter-spacing:-.02em; line-height:1.25; margin-bottom:6px}
+.hero__mid p{color:var(--ink-soft); font-size:.92rem; max-width:50ch}
+.hero__mid p strong{color:var(--ink)}
+.delta{display:inline-flex; align-items:center; gap:5px; font-family:var(--f-mono);
+  font-weight:600; font-size:.85rem; border-radius:8px; padding:3px 9px; margin-left:8px}
+.delta--up{color:var(--ok); background:var(--ok-soft)}
+.delta--down{color:var(--alert); background:var(--opp-soft)}
+.ruler{margin-top:18px}
+.ruler__track{position:relative; height:26px; border-radius:7px; background:var(--piste)}
+.ruler__ticks{position:absolute; inset:0; border-radius:7px; overflow:hidden;
+  background:repeating-linear-gradient(90deg,rgba(127,140,160,.30) 0 1px,transparent 1px 10%)}
+.ruler__fill{position:absolute; top:0; bottom:0; left:0;
+  background:linear-gradient(90deg,#3B63F4,var(--signal)); border-radius:7px 0 0 7px}
+.ruler__goal{position:absolute; top:-6px; bottom:-6px; width:2px; background:var(--ink)}
+.ruler__goal span{position:absolute; top:-24px; left:-20px; font-family:var(--f-mono);
+  font-size:.72rem; font-weight:600; white-space:nowrap; background:var(--ink);
+  color:var(--paper); padding:2px 7px; border-radius:6px}
+.ruler__caption{display:flex; justify-content:space-between; font-size:.78rem;
+  color:var(--ink-soft); margin-top:10px; gap:12px; flex-wrap:wrap}
+.ruler__caption strong{color:var(--ink)}
+.hero__side{display:grid; gap:14px; min-width:190px}
+.stat{border-left:2px solid var(--line); padding-left:14px}
+.stat__num{font-family:var(--f-mono); font-weight:700; font-size:1.35rem; letter-spacing:-.02em}
+.stat__lbl{font-size:.76rem; color:var(--ink-soft)}
+.stat--crown .stat__num{color:var(--signal)}
 
-/* ---------------------------------------------------------------- colonne */
-.rail{padding:26px 18px; display:flex; flex-direction:column; gap:26px;
-  border-right:1px solid var(--bord); position:sticky; top:0; height:100vh}
-.logo{display:flex; align-items:center; gap:10px; font-size:15px; font-weight:650;
-  letter-spacing:-.015em}
-.logo i{width:26px; height:26px; border-radius:9px; flex:none;
-  background:linear-gradient(145deg,var(--data),#1c5cab); box-shadow:var(--ombre)}
-.logo small{display:block; font-size:11px; font-weight:400; color:var(--ink-3);
-  letter-spacing:0; margin-top:1px}
-nav{display:flex; flex-direction:column; gap:2px}
-.nav{appearance:none; background:none; border:0; text-align:left; font:inherit;
-  color:var(--ink-2); padding:9px 12px; border-radius:10px; cursor:pointer;
-  display:flex; align-items:center; gap:10px; transition:background .12s}
-.nav:hover{background:var(--verre)}
-.nav[aria-selected="true"]{background:var(--verre-haut); color:var(--ink);
-  font-weight:550; box-shadow:var(--ombre)}
-.nav:focus-visible{outline:2px solid var(--data); outline-offset:2px}
-.nav b{width:6px; height:6px; border-radius:50%; background:var(--ink-3); flex:none}
-.nav[aria-selected="true"] b{background:var(--data)}
-.rail .bas{margin-top:auto; display:flex; flex-direction:column; gap:10px;
-  font-size:12px; color:var(--ink-3)}
-.selclient{font:inherit; font-size:13px; color:var(--ink); width:100%;
-  background:var(--verre); border:1px solid var(--bord); border-radius:10px; padding:8px 10px}
-.puce{display:inline-block; padding:7px 11px; border-radius:10px; background:var(--verre);
-  border:1px solid var(--bord); font-size:13px; color:var(--ink); font-weight:550}
+.mission{border-radius:22px; border:1px solid rgba(138,97,0,.28); background:var(--opp-soft);
+  padding:26px 30px; margin-bottom:18px; display:grid; grid-template-columns:1fr auto;
+  gap:24px; align-items:center}
+.mission__eyebrow{display:flex; align-items:center; gap:8px; font-size:.72rem; font-weight:700;
+  text-transform:uppercase; letter-spacing:.12em; color:var(--opp); margin-bottom:8px}
+.mission__eyebrow::before{content:""; width:8px; height:8px; border-radius:50%; background:var(--opp)}
+.mission h2{font-family:var(--f-display); font-weight:700; font-size:1.32rem;
+  letter-spacing:-.02em; margin-bottom:8px; line-height:1.3}
+.mission p{font-size:.92rem; color:var(--ink-soft); max-width:64ch}
+.mission p strong{color:var(--ink)}
+.mission__side{display:grid; gap:12px; justify-items:end; text-align:right}
+.mission__impact{font-family:var(--f-mono); font-weight:700; font-size:1.6rem; color:var(--opp);
+  line-height:1}
+.mission__impact small{display:block; font-family:var(--f-body); font-weight:600; font-size:.72rem;
+  letter-spacing:.06em; text-transform:uppercase; margin-top:4px; opacity:.85}
+.btn{display:inline-flex; align-items:center; gap:8px; border:none; cursor:pointer;
+  font-family:var(--f-body); font-weight:700; font-size:.9rem; padding:12px 22px;
+  border-radius:12px; transition:transform .15s}
+.btn--primary{background:var(--ink); color:var(--paper)}
+@media(hover:hover){.btn--primary:hover{transform:translateY(-2px)}}
+.btn:focus-visible{outline:3px solid var(--signal); outline-offset:2px}
 
-/* ------------------------------------------------------------------ grille */
-main{padding:26px 30px 60px; min-width:0}
-@media(max-width:900px){
-  .app{grid-template-columns:1fr}
-  .rail{position:static; height:auto; border-right:0; border-bottom:1px solid var(--bord);
-    flex-direction:row; align-items:center; gap:16px; flex-wrap:wrap}
-  .rail nav{flex-direction:row} .rail .bas{margin:0; flex-direction:row; align-items:center}
-  main{padding:20px}
-}
-.grille{display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:16px}
-.c4{grid-column:span 4} .c5{grid-column:span 5} .c6{grid-column:span 6}
-.c7{grid-column:span 7} .c8{grid-column:span 8} .c12{grid-column:span 12}
-@media(max-width:1080px){.c4,.c5,.c6,.c7,.c8{grid-column:span 12}}
+.queue{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:18px}
+.queue__card{background:var(--paper); border:1px solid var(--line); border-radius:var(--r);
+  padding:18px 20px; display:flex; gap:16px; align-items:center; justify-content:space-between}
+.queue__txt h3{font-size:.95rem; font-weight:700; margin-bottom:3px}
+.queue__txt p{font-size:.82rem; color:var(--ink-soft)}
+.queue__rate{font-family:var(--f-mono); font-weight:700; font-size:1.05rem; color:var(--alert);
+  white-space:nowrap}
+.queue__rate--warn{color:var(--opp)}
 
-.carte{background:var(--verre); backdrop-filter:blur(26px) saturate(1.7);
-  -webkit-backdrop-filter:blur(26px) saturate(1.7);
-  border:1px solid var(--bord); border-radius:20px; padding:20px 22px;
-  box-shadow:var(--ombre); transition:box-shadow .18s, transform .18s}
-.carte:hover{box-shadow:var(--ombre-h)}
-.carte.forte{background:var(--verre-haut)}
-.tete{display:flex; align-items:baseline; gap:10px; margin:0 0 16px}
-.tete h2{font-size:12.5px; font-weight:600; margin:0; letter-spacing:-.005em}
-.tete em{font-style:normal; font-size:11.5px; color:var(--ink-3); margin-left:auto;
-  font-variant-numeric:tabular-nums}
-.aide{width:15px; height:15px; border-radius:50%; border:1px solid var(--bord);
-  color:var(--ink-3); font-size:10px; line-height:13px; text-align:center; cursor:help;
-  background:none; padding:0; flex:none}
-.aide:focus-visible{outline:2px solid var(--data); outline-offset:2px}
+.grid{display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:18px}
+.card{background:var(--paper); border:1px solid var(--line); border-radius:22px; padding:24px 26px}
+.card__head{display:flex; align-items:baseline; justify-content:space-between; gap:12px;
+  margin-bottom:6px}
+.card__head h2{font-family:var(--f-display); font-weight:700; font-size:1.1rem; letter-spacing:-.01em}
+.card__hint{font-size:.76rem; color:var(--ink-faint); text-align:right}
+.card__lead{font-size:.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:58ch}
+.card__lead strong{color:var(--ink)}
 
-/* ------------------------------------------------------------------ jauge */
-.jauge{display:flex; align-items:center; gap:22px; flex-wrap:wrap}
-.jauge svg{flex:none}
-.jauge .txt .n{font-size:52px; font-weight:700; letter-spacing:-.04em; line-height:1}
-.jauge .txt .n s{text-decoration:none; font-size:.44em; font-weight:600; margin-left:2px}
-.jauge .txt p{margin:6px 0 0; color:var(--ink-2); font-size:13px; max-width:26ch}
+.lb{list-style:none}
+.lb li{display:grid; grid-template-columns:26px 1fr auto auto; gap:12px; align-items:center;
+  padding:11px 10px; border-radius:12px; font-size:.9rem; border-bottom:1px solid var(--line)}
+.lb li:last-child{border-bottom:none}
+.lb__rank{font-family:var(--f-mono); font-weight:600; font-size:.8rem; color:var(--ink-faint)}
+.lb__dom{font-weight:600; overflow-wrap:anywhere}
+.lb__dom small{display:block; font-weight:500; font-size:.74rem; color:var(--ink-soft)}
+.lb__part{font-family:var(--f-mono); font-weight:700}
+.lb__bar{width:88px; height:7px; border-radius:99px; background:var(--piste); overflow:hidden}
+.lb__bar i{display:block; height:100%; border-radius:99px; background:var(--ink-faint)}
+.lb li.is-you{background:var(--signal-soft); border-bottom-color:transparent}
+.lb li.is-you .lb__dom{color:var(--signal)}
+.lb li.is-you .lb__bar i{background:var(--signal)}
+.lb li.is-chaser .lb__part{color:var(--alert)}
+.lb li.is-chaser .lb__bar i{background:var(--alert)}
+.lb__gap{grid-column:2/-1; font-size:.78rem; color:var(--alert); font-weight:600; margin-top:-4px}
 
-.stat .n{font-size:34px; font-weight:680; letter-spacing:-.03em; line-height:1.05}
-.stat .sous{font-size:12.5px; color:var(--ink-2); margin-top:6px}
-.stat .sous b{color:var(--ink); font-weight:600}
+.st{list-style:none; display:grid; gap:14px}
+.st li h3{font-size:.9rem; font-weight:600; margin-bottom:6px; display:flex;
+  justify-content:space-between; gap:12px}
+.st li h3 span{font-family:var(--f-mono); font-weight:700; color:var(--ok)}
+.st__bar{height:8px; border-radius:99px; background:var(--piste); overflow:hidden}
+.st__bar i{display:block; height:100%; border-radius:99px; background:var(--ok)}
 
-/* ------------------------------------------------------------------ barres */
-.rangs{display:flex; flex-direction:column; gap:11px}
-.rang{display:grid; grid-template-columns:minmax(84px,132px) 1fr auto; gap:12px;
-  align-items:center; font-size:13px}
-.rang .lib{color:var(--ink-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-.piste{height:10px; border-radius:5px; background:var(--h0); overflow:hidden}
-.piste i{display:block; height:100%; border-radius:5px; background:var(--data)}
-.piste i.trou{background:var(--gap)}
-.rang .v{font-variant-numeric:tabular-nums; color:var(--ink); font-weight:550; min-width:38px;
-  text-align:right}
+.engines{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:18px}
+.eng{background:var(--paper); border:1px solid var(--line); border-radius:var(--r); padding:18px 20px}
+.eng h3{font-size:.9rem; font-weight:700; margin-bottom:2px}
+.eng__rate{font-family:var(--f-mono); font-weight:700; font-size:1.7rem; letter-spacing:-.03em;
+  margin-bottom:8px}
+.eng__bar{height:7px; border-radius:99px; background:var(--piste); overflow:hidden; margin-bottom:10px}
+.eng__bar i{display:block; height:100%; background:var(--signal); border-radius:99px}
+.eng p{font-size:.79rem; color:var(--ink-soft); line-height:1.5}
+.eng--zero .eng__rate{color:var(--ink-faint)}
+.eng--zero .eng__bar i{background:var(--ink-faint)}
+.eng__tag{display:inline-block; font-size:.68rem; font-weight:700; text-transform:uppercase;
+  letter-spacing:.08em; padding:3px 8px; border-radius:6px; margin-top:10px}
+.eng__tag--goal{background:var(--opp-soft); color:var(--opp)}
+.eng__tag--best{background:var(--ok-soft); color:var(--ok)}
 
-/* ---------------------------------------------------------- barre empilee */
-.empile{display:flex; gap:2px; height:34px; border-radius:9px; overflow:hidden; margin-bottom:14px}
-.empile span{display:block; background:var(--neutre); transition:filter .12s}
-.empile span.moi{background:var(--data)}
-.empile span:hover{filter:brightness(1.12)}
-.liste{display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:7px 18px;
-  font-size:12.5px}
-.liste div{display:flex; align-items:center; gap:8px; color:var(--ink-2)}
-.liste i{width:8px; height:8px; border-radius:2px; background:var(--neutre); flex:none}
-.liste i.moi{background:var(--data)}
-.liste b{margin-left:auto; color:var(--ink); font-weight:550; font-variant-numeric:tabular-nums}
+.foot{display:flex; align-items:center; justify-content:space-between; gap:16px;
+  background:var(--paper); border:1px solid var(--line); border-radius:var(--r);
+  padding:16px 22px; font-size:.84rem; color:var(--ink-soft); flex-wrap:wrap}
+.foot strong{color:var(--ink)}
+.foot__spark{display:flex; align-items:flex-end; gap:3px; height:26px}
+.foot__spark i{width:7px; border-radius:2px; background:var(--signal-soft)}
+.foot__spark i.on{background:var(--signal)}
 
-/* --------------------------------------------------------------- matrice */
-.mat{width:100%; border-collapse:separate; border-spacing:3px; font-size:12px}
-.mat th{font-weight:500; color:var(--ink-3); font-size:11px; text-align:center; padding:0 0 4px}
-.mat th.g{text-align:left; font-weight:400; color:var(--ink-2)}
-.mat td{text-align:center; border-radius:7px; height:30px; color:var(--ink-2);
-  font-variant-numeric:tabular-nums; cursor:default}
-.mat td.h0{background:var(--h0)} .mat td.h1{background:var(--h1)}
-.mat td.h2{background:var(--h2)} .mat td.h3{background:var(--h3); color:#fff}
-.mat td.h4{background:var(--h4); color:#fff} .mat td.h5{background:var(--h5); color:#fff}
-.mat td.vide{background:var(--h0); color:var(--ink-3)}
-.mat .lib{text-align:left; padding-right:10px; color:var(--ink-2); max-width:0;
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background:none}
-.echelle{display:flex; align-items:center; gap:7px; margin-top:14px; font-size:11.5px;
-  color:var(--ink-3)}
-.echelle u{text-decoration:none; width:26px; height:9px; border-radius:3px; display:block}
-
-/* ---------------------------------------------------------------- actions */
-.todo{display:flex; flex-direction:column; gap:2px}
-.todo a{display:grid; grid-template-columns:auto 1fr auto; gap:14px; align-items:center;
-  padding:13px 12px; border-radius:12px; text-decoration:none; color:inherit}
-.todo a:hover{background:var(--verre-haut)}
-.todo .pt{width:8px; height:8px; border-radius:50%; background:var(--gap); flex:none}
-.todo .q{font-size:13.5px}
-.todo .q s{display:block; text-decoration:none; font-size:12px; color:var(--ink-3); margin-top:2px}
-.todo .n{font-size:13px; font-variant-numeric:tabular-nums; color:var(--ink-3)}
-
-/* ------------------------------------------------------------------ table */
-.tw{overflow-x:auto; margin:-4px -6px}
-table.d{border-collapse:collapse; width:100%; font-size:13px}
-table.d th,table.d td{text-align:left; padding:10px 14px; border-bottom:1px solid var(--bord)}
-table.d th{font-size:11px; font-weight:600; color:var(--ink-3); letter-spacing:.07em;
+.tw{overflow-x:auto}
+table.d{border-collapse:collapse; width:100%; font-size:.86rem}
+table.d th,table.d td{text-align:left; padding:10px 14px; border-bottom:1px solid var(--line)}
+table.d th{font-size:.7rem; font-weight:700; color:var(--ink-faint); letter-spacing:.07em;
   text-transform:uppercase; white-space:nowrap}
-table.d td.n{font-variant-numeric:tabular-nums; white-space:nowrap}
-table.d tr:last-child td{border-bottom:0}
-.mini{display:inline-block; width:52px; height:5px; border-radius:3px; background:var(--h0);
-  vertical-align:middle; margin-right:9px; overflow:hidden}
-.mini i{display:block; height:100%; background:var(--data); border-radius:3px}
-.mini i.trou{background:var(--gap)}
-.note{font-size:12.5px; color:var(--ink-2); margin:16px 0 0; max-width:74ch}
+table.d td.n{font-family:var(--f-mono); white-space:nowrap}
+table.d tr:last-child td{border-bottom:none}
+
 [hidden]{display:none!important}
-
-/* --- carte du taux : jauge, chiffre, puis le cap a atteindre --- */
-.gros{display:flex; align-items:center; gap:8px; margin-bottom:22px; flex-wrap:wrap}
-.gros svg{flex:none; margin-left:-8px}
-.chiffre{font-size:56px; font-weight:700; letter-spacing:-.045em; line-height:1}
-.chiffre s{text-decoration:none; font-size:.42em; font-weight:600; margin-left:2px}
-.gros p{margin:6px 0 0; color:var(--ink-2); font-size:13.5px; max-width:24ch}
-.cap .jauge{position:relative; height:8px; border-radius:4px; background:var(--h0)}
-.cap .jauge i{display:block; height:100%; border-radius:4px; background:var(--data)}
-.cap .jauge u{position:absolute; top:-5px; width:2px; height:18px; border-radius:1px;
-  background:var(--ink-3); text-decoration:none}
-.cap p{margin:11px 0 0; font-size:12.5px; color:var(--ink-2)}
-.cap b{color:var(--ink); font-weight:600}
-
-/* --- carte des reperes --- */
-.reperes{display:flex; flex-direction:column; gap:18px}
-.reperes>div:not(.tete){display:flex; flex-direction:column; gap:1px}
-.reperes span{font-size:11.5px; color:var(--ink-3)}
-.reperes b{font-size:26px; font-weight:660; letter-spacing:-.022em; line-height:1.15}
-.reperes em{font-style:normal; font-size:11.5px; color:var(--ink-3)}
-
-/* --- barres par moteur : le libelle porte sa propre interpretation --- */
-.rang{grid-template-columns:minmax(150px,240px) 1fr auto}
-.rang .lib{white-space:normal; line-height:1.3}
-.rang .lib s{display:block; text-decoration:none; font-size:11.5px; color:var(--ink-3);
-  margin-top:2px}
-
-/* --- tableaux : la colonne d'interpretation est le coeur du produit --- */
-table.d td.fort{font-weight:550; color:var(--ink)}
-table.d td.lec{color:var(--ink-2); font-size:12.5px; line-height:1.4}
-table.d tr.moi td{background:rgba(42,120,214,.08)}
-table.d tr.moi td:first-child{border-radius:8px 0 0 8px}
-table.d tr.moi td:last-child{border-radius:0 8px 8px 0}
-table.d tr.moi td.fort{font-weight:680}
-table.d b.rouge{color:var(--gap)}
-
-#tip{position:fixed; z-index:20; pointer-events:none; opacity:0; transform:translateY(3px);
-  transition:opacity .12s,transform .12s; background:rgba(10,13,18,.94); color:#fff;
-  font-size:12.5px; line-height:1.45; padding:8px 11px; border-radius:9px; max-width:280px;
-  box-shadow:0 8px 26px rgba(0,0,0,.28); backdrop-filter:blur(8px)}
-#tip.on{opacity:1; transform:translateY(0)}
+@media(max-width:960px){
+  .hero{grid-template-columns:1fr; text-align:center}
+  .gauge{margin:0 auto}
+  .hero__side{grid-template-columns:repeat(3,1fr); min-width:0}
+  .stat{border-left:none; border-top:2px solid var(--line); padding:10px 0 0}
+  .engines{grid-template-columns:repeat(2,1fr)}
+  .grid,.queue{grid-template-columns:1fr}
+  .mission{grid-template-columns:1fr}
+  .mission__side{justify-items:start; text-align:left}
+}
+@media(max-width:560px){
+  .wrap{padding:18px 14px 60px}
+  .hero,.mission,.card{padding:20px}
+  .engines,.hero__side{grid-template-columns:1fr}
+  .lb li{grid-template-columns:22px 1fr auto}
+  .lb__bar{display:none}
+}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 """
 
 JS = """
 (function(){
-  var tip=document.getElementById('tip'), cible=null;
-  function placer(e){var x=(e.clientX||0)+14,y=(e.clientY||0)+16,r=tip.getBoundingClientRect();
-    if(x+r.width>innerWidth-12)x=innerWidth-r.width-12;
-    if(y+r.height>innerHeight-12)y=(e.clientY||0)-r.height-12;
-    tip.style.left=x+'px';tip.style.top=y+'px';}
-  function montrer(el,e){tip.textContent=el.getAttribute('data-tip');tip.classList.add('on');
-    placer(e||{clientX:0,clientY:0});cible=el;}
-  function cacher(){tip.classList.remove('on');cible=null;}
-  addEventListener('mouseover',function(e){var el=e.target.closest('[data-tip]');
-    if(el&&el!==cible)montrer(el,e);});
-  addEventListener('mousemove',function(e){if(cible)placer(e);});
-  addEventListener('mouseout',function(e){var r=e.relatedTarget;
-    if(cible&&!(r&&r.closest&&r.closest('[data-tip]')))cacher();});
-  addEventListener('focusin',function(e){var el=e.target.closest('[data-tip]');if(!el)return;
-    var r=el.getBoundingClientRect();montrer(el,{clientX:r.left+30,clientY:r.top});});
-  addEventListener('focusout',cacher);
-  addEventListener('keydown',function(e){if(e.key==='Escape')cacher();});
-
-  var nav=[].slice.call(document.querySelectorAll('.nav'));
-  function activer(id){nav.forEach(function(o){
-    var a=o.getAttribute('aria-controls')===id;
-    o.setAttribute('aria-selected',a?'true':'false');
-    document.getElementById(o.getAttribute('aria-controls')).hidden=!a;});}
-  nav.forEach(function(o,i){
-    o.addEventListener('click',function(){activer(o.getAttribute('aria-controls'));});
-    o.addEventListener('keydown',function(e){
-      var d=e.key==='ArrowDown'||e.key==='ArrowRight'?1:
-            e.key==='ArrowUp'||e.key==='ArrowLeft'?-1:0;
-      if(!d)return; e.preventDefault();
-      var n=nav[(i+d+nav.length)%nav.length]; n.focus(); activer(n.getAttribute('aria-controls'));});
+  document.querySelectorAll('[data-brief]').forEach(function(b){
+    b.addEventListener('click',function(){
+      var self=this, texte=this.getAttribute('data-brief'), avant=this.textContent;
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(texte).then(function(){
+          self.textContent='Brief copié';
+          setTimeout(function(){self.textContent=avant;},1800);
+        });
+      }
+    });
   });
+  var nav=[].slice.call(document.querySelectorAll('.nav'));
+  nav.forEach(function(o){o.addEventListener('click',function(){
+    nav.forEach(function(x){
+      var actif=x===o;
+      x.setAttribute('aria-selected',actif?'true':'false');
+      document.getElementById(x.getAttribute('aria-controls')).hidden=!actif;
+    });
+  });});
 })();
 """
 
 
-def _lecture_moteur(m: dict, tous: list[dict]) -> str:
-    """LA colonne qui fait la différence : un chiffre seul ne dit rien, on écrit
-    ce qu'il faut en comprendre. C'est le §6 du master, « la valeur n'est pas
-    dans le tableau de bord, elle est dans l'interprétation ».
-    Aucun outil du marché ne propose cette colonne."""
-    if not m["recherche"]:
-        return (
-            "le modèle ne connaît pas encore la marque sans aller chercher"
-            if m["taux"] < 5
-            else "le modèle commence à connaître la marque de mémoire"
-        )
-    avec = [x for x in tous if x["recherche"]]
-    if not avec:
-        return ""
-    meilleur = max(x["taux"] for x in avec)
-    pire = min(x["taux"] for x in avec)
-    rangs = [x["rang"] for x in avec if x["rang"]]
-    if m["taux"] >= meilleur:
-        ecart = meilleur - pire
-        return "le moteur le plus favorable, et de loin" if ecart > 20 else "le moteur le plus favorable"
-    if m["rang"] and rangs and m["rang"] <= min(rangs):
-        return f"le plus dur à percer, mais la meilleure place quand la marque y est"
-    if m["taux"] <= pire:
-        return "le plus difficile à percer"
-    if m["rang"]:
-        return f"bien placée quand elle y est, rang {m['rang']:.1f}"
-    return ""
-
-
-def _diagnostic(q: dict) -> str:
-    """Même principe côté requêtes : un pourcentage bas n'est pas un échec,
-    c'est un sujet manquant. On le dit, au lieu de laisser lire un chiffre."""
-    if q["taux"] < 1:
-        return "aucun contenu sur ce sujet : personne ne cite parce qu'il n'y a rien à citer"
-    if q["taux"] < 10:
-        return "quasi invisible, alors que la question est posée"
-    return "sujet proche de l'offre, mais la marque y est trop peu présente"
-
-
-def _objectif(taux: float) -> tuple[int, float]:
-    """Le palier suivant, par tranches de 10 points : un cap plutôt qu'un
-    simple constat, sans inventer d'objectif arbitraire."""
-    palier = min(100, (int(taux // 10) + 1) * 10)
-    return palier, palier - taux
-
-
-def _jauge(taux: float) -> str:
-    """Demi-cercle : la forme juste pour un ratio unique face à un maximum."""
-    longueur = 3.14159 * 84
-    return f"""<svg width="188" height="106" viewBox="0 0 196 108" aria-hidden="true">
-<path d="M14 100 A84 84 0 0 1 182 100" fill="none" stroke="var(--h0)"
-      stroke-width="16" stroke-linecap="round"/>
-<path d="M14 100 A84 84 0 0 1 182 100" fill="none" stroke="var(--data)"
-      stroke-width="16" stroke-linecap="round"
-      stroke-dasharray="{longueur:.1f}" stroke-dashoffset="{longueur * (1 - taux / 100):.1f}"/>
-</svg>"""
+def _brief(q: dict, d: dict) -> str:
+    """Le bouton copie un VRAI brief de contenu, pas un texte décoratif :
+    la question, l'état mesuré, qui occupe le terrain, l'impact attendu."""
+    occ = d["occupants"].get(q["id"], [])
+    lignes = [
+        f"BRIEF DE CONTENU — {d['client_label']}",
+        "",
+        f"Question à couvrir : {q['texte']}",
+        f"Mesuré le {d['date']} : citée dans {q['cites']} réponse(s) sur {q['ok']} testées "
+        f"({q['taux']:.0f} %).",
+        f"Diagnostic : {_diagnostic(q)}",
+    ]
+    if occ:
+        lignes += ["", "Domaines actuellement cités sur cette question :"] + [f"  - {o}" for o in occ]
+    else:
+        lignes += ["", "Aucun domaine ne s'impose : terrain libre."]
+    lignes += [
+        "",
+        f"Impact estimé si ce sujet atteint le niveau des sujets qui fonctionnent : "
+        f"+{_impact(q, d['requetes'], d['resume']):.1f} points de taux de citation global.",
+    ]
+    return "\n".join(lignes)
 
 
 def _vue_resultats(d: dict) -> str:
     r = d["resume"]
     taux = r["rate"] or 0
-    moi = next((v for v in d["voix"] if v["moi"]), None)
-    place = next((i for i, v in enumerate(d["voix"], 1) if v["moi"]), None)
+    palier, reste = _objectif(taux)
     trous = [q for q in d["requetes"] if q["taux"] < SEUIL_TROU]
     forts = [q for q in d["requetes"] if q["taux"] >= 60][:5]
-    palier, reste = _objectif(taux)
-    n_jours = len(d["serie"])
+    moi = next((v for v in d["voix"] if v["moi"]), None)
+    place = next((i for i, v in enumerate(d["voix"], 1) if v["moi"]), None)
+    poursuivant = next((v for v in d["voix"] if not v["moi"]), None)
 
-    def rang_moteur(m: dict) -> str:
-        barre = "trou" if m["taux"] < SEUIL_TROU else ""
-        nom = NOMS_MOTEURS.get(m["id"], m["id"])
-        lecture = _lecture_moteur(m, d["moteurs"])
-        tip = f"{nom} : {m['cites']} citations sur {m['ok']} appels"
-        if m["rang"]:
-            tip += f" · rang moyen {m['rang']:.1f}"
-        return (
-            f'<div class="rang" data-tip="{_e(tip)}">'
-            f'<span class="lib">{_e(nom)}<s>{_e(lecture)}</s></span>'
-            f'<span class="piste"><i class="{barre}" style="width:{m["taux"]:.0f}%"></i></span>'
-            f'<span class="v">{m["taux"]:.0f}%</span></div>'
-        )
+    impacts = [_impact(q, d["requetes"], r) for q in trous]
+    moyen = (sum(impacts) / len(impacts)) if impacts else 0
+    contenus = math.ceil(reste / moyen) if moyen > 0.2 else None
 
-    def tr_voix(v: dict) -> str:
-        classe = ' class="moi"' if v["moi"] else ""
-        note = v["label"] or ("la marque suivie" if v["moi"] else "")
-        return (
-            f"<tr{classe}><td class=\"fort\">{_e(v['domaine'])}</td>"
-            f'<td class="n"><b>{v["part"]:.1f} %</b></td>'
-            f'<td class="n">{v["rang"]:.1f}</td>'
-            f'<td class="lec">{_e(note)}</td></tr>'
-        )
+    if d["delta"] is None:
+        badge = ""
+        phrase = "Première collecte de ce périmètre : la courbe démarre ici."
+    else:
+        haut = d["delta"] >= 0
+        badge = (f'<span class="delta delta--{"up" if haut else "down"}">'
+                 f'{"▲" if haut else "▼"} {abs(d["delta"]):.1f} pts</span>')
+        phrase = f"{'▲' if haut else '▼'} {abs(d['delta']):.1f} points depuis la collecte précédente."
 
-    def tr_ecrire(q: dict) -> str:
-        rouge = ' class="rouge"' if q["taux"] < 10 else ""
-        return (
-            f'<tr><td class="fort">{_e(q["texte"])}</td>'
-            f'<td class="n"><b{rouge}>{q["taux"]:.0f} %</b></td>'
-            f'<td class="lec">{_e(_diagnostic(q))}</td></tr>'
-        )
+    reste_txt = f"<strong>+{reste:.0f} pts restants</strong>"
+    if contenus:
+        reste_txt += f" · <strong>~{contenus} contenu{'s' if contenus > 1 else ''}</strong>"
 
-    moteurs = "".join(rang_moteur(m) for m in d["moteurs"])
-    voix = "".join(tr_voix(v) for v in d["voix"][:7])
-    ecrire = "".join(tr_ecrire(q) for q in trous) or (
-        '<tr><td colspan="3" class="lec">Aucun trou de contenu sur cette collecte.</td></tr>'
+    mission, cible = "", None
+    if trous:
+        cible = max(trous, key=lambda q: _impact(q, d["requetes"], r))
+        occ = d["occupants"].get(cible["id"], [])
+        contexte = (f"Le terrain est occupé par {', '.join(occ[:3])}." if occ
+                    else "Aucun domaine ne s'impose : le terrain est libre.")
+        mission = f"""
+  <section class="mission">
+    <div>
+      <div class="mission__eyebrow">Ta prochaine action · opportunité n°1</div>
+      <h2>« {_e(cible['texte'])} »</h2>
+      <p>{_e(_diagnostic(cible))} {_e(contexte)}
+      <strong>C'est le sujet où un contenu rapporterait le plus.</strong></p>
+    </div>
+    <div class="mission__side">
+      <div class="mission__impact">+{_impact(cible, d['requetes'], r):.1f} pts<small>impact estimé</small></div>
+      <button class="btn btn--primary" data-brief="{_e(_brief(cible, d))}">Copier le brief</button>
+    </div>
+  </section>"""
+
+    suite = [q for q in trous if cible is None or q["id"] != cible["id"]][:2]
+    queue = "".join(
+        f'<article class="queue__card"><div class="queue__txt">'
+        f'<h3>« {_e(q["texte"])} »</h3><p>{_e(_diagnostic(q))}</p></div>'
+        f'<div class="queue__rate{" queue__rate--warn" if q["taux"] >= 10 else ""}">'
+        f'{q["taux"]:.0f} %</div></article>'
+        for q in suite
     )
-    points = "".join(
-        f'<tr><td class="fort">{_e(q["texte"])}</td>'
-        f'<td class="n"><b>{q["taux"]:.0f} %</b></td></tr>'
+
+    tete = d["voix"][0]["part"] if d["voix"] else 1
+    lb = ""
+    for i, v in enumerate(d["voix"], 1):
+        cls = "is-you" if v["moi"] else ("is-chaser" if v is poursuivant else "")
+        ecart = ""
+        if v is poursuivant and moi and place == 1:
+            ecart = (f'<span class="lb__gap">à {moi["part"] - v["part"]:.1f} pts '
+                     f'derrière la marque</span>')
+        sous = v["label"] or ("la marque suivie" if v["moi"] else "")
+        lb += (f'<li class="{cls}"><span class="lb__rank">{i}</span>'
+               f'<span class="lb__dom">{_e(v["domaine"])}'
+               + (f"<small>{_e(sous)}</small>" if sous else "")
+               + f'</span><span class="lb__bar"><i style="width:{v["part"] / tete * 100:.0f}%"></i>'
+               f'</span><span class="lb__part">{v["part"]:.1f} %</span>{ecart}</li>')
+
+    st = "".join(
+        f'<li><h3>{_e(q["texte"])} <span>{q["taux"]:.0f} %</span></h3>'
+        f'<div class="st__bar"><i style="width:{q["taux"]:.0f}%"></i></div></li>'
         for q in forts
-    ) or '<tr><td colspan="2" class="lec">Aucune requête au-dessus de 60 %.</td></tr>'
+    )
 
-    part = f"{moi['part']:.1f} %" if moi else "n/d"
-    rang_moi = ("1<sup>re</sup>" if place == 1 else f"{place}<sup>e</sup>") if place else "—"
-    rang_moyen = f"{r['avg_rank']:.1f}" if r["avg_rank"] else "n/d"
-    s_jours = "s" if n_jours > 1 else ""
-    s_trous = "s" if len(trous) > 1 else ""
+    eng, meilleur = "", max((x["taux"] for x in d["moteurs"]), default=0)
+    for m in d["moteurs"]:
+        tag = ""
+        if m["recherche"] and m["taux"] >= meilleur:
+            tag = '<span class="eng__tag eng__tag--best">Ton allié</span>'
+        elif not m["recherche"]:
+            tag = '<span class="eng__tag eng__tag--goal">Objectif long terme</span>'
+        eng += (f'<article class="eng{" eng--zero" if m["taux"] < 1 else ""}">'
+                f'<h3>{_e(NOMS_MOTEURS.get(m["id"], m["id"]))}</h3>'
+                f'<div class="eng__rate">{m["taux"]:.0f} %</div>'
+                f'<div class="eng__bar"><i style="width:{max(m["taux"], 2):.0f}%"></i></div>'
+                f'<p>{_e(_lecture_moteur(m, d["moteurs"]))}</p>{tag}</article>')
 
-    return f"""<div class="grille">
+    if len(d["serie"]) > 1:
+        barres = "".join(
+            f'<i class="{"on" if i >= len(d["serie"]) - 2 else ""}" '
+            f'style="height:{6 + p["taux"] / 100 * 20:.0f}px"></i>'
+            for i, p in enumerate(d["serie"])
+        )
+        spark = f'<div class="foot__spark">{barres}</div>'
+    else:
+        spark = '<span>La courbe apparaîtra à la deuxième collecte.</span>'
 
-<div class="carte forte c7">
-  <div class="tete"><h2>Taux de citation</h2>
-    <button class="aide" data-tip="Une réponse d'IA n'est pas stable : posée trois fois, la même question peut donner trois réponses différentes. Ce taux est mesuré, pas constaté une fois.">?</button>
-    <em>{r['n']} appels</em></div>
-  <div class="gros">{_jauge(taux)}
-    <div><div class="chiffre">{taux:.0f}<s>%</s></div>
-      <p>des réponses citent la marque</p></div></div>
-  <div class="cap" data-tip="Le palier suivant se calcule par tranches de 10 points : un cap, sans objectif arbitraire.">
-    <div class="jauge"><i style="width:{taux:.0f}%"></i><u style="left:{palier}%"></u></div>
-    <p><b>+{reste:.0f} points</b> pour atteindre le palier de {palier}&nbsp;%</p>
+    titre = ("Une réponse d'IA sur deux cite la marque" if 45 <= taux <= 55
+             else f"{taux:.0f} % des réponses d'IA citent la marque")
+    L = 267
+    lead_voix = (
+        f"La marque domine, mais <strong>{_e(poursuivant['domaine'])} n'est "
+        f"qu'à {moi['part'] - poursuivant['part']:.1f} pts</strong>."
+        if moi and poursuivant and place == 1
+        else "Répartition des citations relevées pendant la collecte."
+    )
+    lead_forts = (
+        f"<strong>{_e(forts[0]['texte'])}</strong> à {forts[0]['taux']:.0f} % : la preuve que la "
+        f"méthode fonctionne. Il suffit de la répliquer sur les sujets ci-dessus."
+        if forts else "Aucune requête au-dessus de 60 % pour l'instant."
+    )
+
+    return f"""
+  <section class="hero">
+    <div class="gauge">
+      <svg viewBox="0 0 210 130" aria-hidden="true">
+        <path d="M20 110 A85 85 0 0 1 190 110" fill="none" stroke="var(--piste)"
+              stroke-width="14" stroke-linecap="round"/>
+        <path d="M20 110 A85 85 0 0 1 190 110" fill="none" stroke="var(--ink-faint)"
+              stroke-width="14" stroke-linecap="round" stroke-dasharray="{L * palier / 100:.1f} {L}"/>
+        <path d="M20 110 A85 85 0 0 1 190 110" fill="none" stroke="var(--signal)"
+              stroke-width="14" stroke-linecap="round" stroke-dasharray="{L * taux / 100:.1f} {L}"/>
+      </svg>
+      <div class="gauge__value">{taux:.0f}<small>%</small></div>
+      <div class="gauge__label">Visibilité IA</div>
+    </div>
+    <div class="hero__mid">
+      <h1>{titre}{badge}</h1>
+      <p>Mesuré sur <strong>{r['n']} appels</strong>, {len(d['moteurs'])} moteurs. {_e(phrase)}</p>
+      <div class="ruler">
+        <div class="ruler__track">
+          <span class="ruler__ticks"></span>
+          <span class="ruler__fill" style="width:{taux:.0f}%"></span>
+          <span class="ruler__goal" style="left:{palier}%"><span>Palier {palier} %</span></span>
+        </div>
+        <div class="ruler__caption">
+          <span><strong>{taux:.0f} %</strong> aujourd'hui</span><span>{reste_txt}</span>
+        </div>
+      </div>
+    </div>
+    <div class="hero__side">
+      <div class="stat stat--crown"><div class="stat__num">{place or "—"}<sup>{"re" if place == 1 else "e"}</sup></div>
+        <div class="stat__lbl">sur {d['domaines_distincts']} domaines cités</div></div>
+      <div class="stat"><div class="stat__num">{f"{moi['part']:.1f} %" if moi else "n/d"}</div>
+        <div class="stat__lbl">part de voix</div></div>
+      <div class="stat"><div class="stat__num">{f"{r['avg_rank']:.1f}" if r['avg_rank'] else "n/d"}</div>
+        <div class="stat__lbl">rang moyen dans les sources</div></div>
+    </div>
+  </section>
+{mission}
+  <section class="queue">{queue}</section>
+
+  <div class="grid">
+    <section class="card">
+      <div class="card__head"><h2>Qui te prend des citations</h2>
+        <span class="card__hint">{d['total_citations']} citations<br>{d['domaines_distincts']} domaines</span></div>
+      <p class="card__lead">{lead_voix}</p>
+      <ol class="lb">{lb}</ol>
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>Tes forteresses</h2>
+        <span class="card__hint">ce qui a été travaillé se voit</span></div>
+      <p class="card__lead">{lead_forts}</p>
+      <ul class="st">{st}</ul>
+    </section>
   </div>
-</div>
 
-<div class="carte c5 reperes">
-  <div class="tete"><h2>Repères</h2></div>
-  <div><span>Part de voix</span><b>{part}</b><em>{rang_moi} position sur {d['domaines_distincts']} domaines cités</em></div>
-  <div><span>Rang moyen en source</span><b>{rang_moyen}</b><em>place dans la liste des sources</em></div>
-  <div><span>Historique</span><b>{n_jours}</b><em>jour{s_jours} de mesure</em></div>
-</div>
+  <div class="engines">{eng}</div>
 
-<div class="carte c7">
-  <div class="tete"><h2>Par moteur</h2>
-    <button class="aide" data-tip="La dernière ligne mesure autre chose : le modèle connaît-il la marque sans aller chercher sur le web ?">?</button></div>
-  <div class="rangs">{moteurs}</div>
-</div>
-
-<div class="carte c5">
-  <div class="tete"><h2>Part de voix</h2>
-    <em>{d['total_citations']} citations</em></div>
-  <div class="tw"><table class="d">
-    <tr><th>Domaine</th><th>Part</th><th>Rang</th><th></th></tr>
-    {voix}</table></div>
-</div>
-
-<div class="carte forte c7">
-  <div class="tete"><h2>Ce qu'il faut écrire</h2>
-    <button class="aide" data-tip="Une requête où la marque est absente n'est pas un échec : c'est un sujet sur lequel aucun contenu n'existe encore.">?</button>
-    <em>{len(trous)} sujet{s_trous}</em></div>
-  <div class="tw"><table class="d">
-    <tr><th>Requête</th><th>Taux</th><th>Diagnostic</th></tr>
-    {ecrire}</table></div>
-</div>
-
-<div class="carte c5">
-  <div class="tete"><h2>Points forts</h2><em>ce qui a été travaillé se voit</em></div>
-  <div class="tw"><table class="d">
-    <tr><th>Requête</th><th>Taux</th></tr>
-    {points}</table></div>
-</div>
-
-</div>"""
+  <footer class="foot">
+    <div><strong>{_e(_prochaine_collecte())}</strong> Publie aujourd'hui, mesure l'effet ensuite.</div>
+    {spark}
+  </footer>"""
 
 
 def _vue_requetes(d: dict) -> str:
     lignes = "".join(
         f'<tr><td>{_e(q["texte"])}</td><td class="n">{_e(q["id"])}</td>'
-        f'<td class="n">{_e(q["type"])}</td>'
-        f'<td class="n"><span class="mini"><i class="{"trou" if q["taux"] < SEUIL_TROU else ""}" '
-        f'style="width:{q["taux"]:.0f}%"></i></span>{q["taux"]:.0f} %</td>'
+        f'<td class="n">{_e(q["type"])}</td><td class="n">{q["taux"]:.0f} %</td>'
         f'<td class="n">{q["cites"]}/{q["ok"]}</td></tr>'
         for q in sorted(d["requetes"], key=lambda x: x["id"])
     )
-    return f"""<div class="grille"><div class="carte c12">
-  <div class="tete"><h2>Jeu de requêtes</h2>
-    <button class="aide" data-tip="Une requête est une question posée comme un humain la pose, pas un mot-clé.">?</button>
-    <em>version {d['set_version']} · {len(d['requetes'])} requêtes · {d['n_concurrents']} concurrents suivis</em></div>
+    return f"""<section class="card">
+  <div class="card__head"><h2>Jeu de requêtes</h2>
+    <span class="card__hint">version {d['set_version']} · {len(d['requetes'])} requêtes ·
+    {d['n_concurrents']} concurrents suivis</span></div>
+  <p class="card__lead">Une requête est une question posée comme un humain la pose, pas un mot-clé.
+  <strong>Ajouter une requête est sans danger ; en modifier une casse la comparabilité de la
+  série.</strong></p>
   <div class="tw"><table class="d">
-    <tr><th>Requête</th><th>Réf.</th><th>Type</th><th>Citation</th><th>Ratio</th></tr>
-    {lignes}</table></div>
-  <p class="note"><b>Ajouter une requête est sans danger. En modifier ou en retirer une, non.</b>
-  Le jeu définit la série temporelle : si une question change en cours de route, les mesures
-  d'avant et d'après ne sont plus comparables.</p>
-</div></div>"""
+  <tr><th>Requête</th><th>Réf.</th><th>Type</th><th>Citation</th><th>Ratio</th></tr>
+  {lignes}</table></div></section>"""
 
 
 def _vue_collectes(d: dict) -> str:
-    def ligne(h: dict) -> str:
+    def ligne(h):
         t = f'{h["taux"]:.0f} %' if h["taux"] is not None else "—"
-        return (
-            f'<tr><td class="n">#{h["id"]}</td><td class="n">{_e(h["date"])}</td>'
-            f'<td class="n">{h["n"]}</td><td class="n">{h["erreurs"] or "—"}</td>'
-            f'<td class="n">{t}</td><td>{_e(h["note"])}</td></tr>'
-        )
+        return (f'<tr><td class="n">#{h["id"]}</td><td class="n">{_e(h["date"])}</td>'
+                f'<td class="n">{h["n"]}</td><td class="n">{h["erreurs"] or "—"}</td>'
+                f'<td class="n">{t}</td><td>{_e(h["note"])}</td></tr>')
 
-    return f"""<div class="grille"><div class="carte c12">
-  <div class="tete"><h2>Collectes</h2>
-    <button class="aide" data-tip="Chaque collecte interroge tous les moteurs sur toutes les requêtes, plusieurs fois. Elle se déclenche automatiquement chaque semaine.">?</button>
-    <em>{len(d['historique'])} enregistrées</em></div>
+    return f"""<section class="card">
+  <div class="card__head"><h2>Collectes</h2>
+    <span class="card__hint">{len(d['historique'])} enregistrées</span></div>
+  <p class="card__lead">Chaque collecte interroge tous les moteurs sur toutes les requêtes,
+  plusieurs fois. <strong>Les réponses brutes sont conservées horodatées</strong> : les taux se
+  recalculent, une réponse perdue ne se rattrape pas.</p>
   <div class="tw"><table class="d">
-    <tr><th>Réf.</th><th>Date</th><th>Appels</th><th>Erreurs</th><th>Citation</th><th>Note</th></tr>
-    {''.join(ligne(h) for h in d['historique'])}</table></div>
-  <p class="note"><b>Les réponses brutes sont conservées, horodatées, à chaque appel.</b>
-  Les taux se recalculent : si une règle de comptage évolue, tout l'historique est rejoué.
-  Une réponse perdue, elle, ne se rattrape pas.</p>
-</div></div>"""
+  <tr><th>Réf.</th><th>Date</th><th>Appels</th><th>Erreurs</th><th>Citation</th><th>Note</th></tr>
+  {''.join(ligne(h) for h in d['historique'])}</table></div></section>"""
 
 
 def rendu(d: dict) -> str:
     p = d["produit"]
     if len(d["clients"]) > 1:
-        options = "".join(
-            f'<option{" selected" if c == d["client"] else ""}>{_e(c)}</option>'
-            for c in d["clients"]
-        )
-        choix = f'<select class="selclient" aria-label="Client">{options}</select>'
+        opts = "".join(f'<option{" selected" if c == d["client"] else ""}>{_e(c)}</option>'
+                       for c in d["clients"])
+        client = f'<select class="chip" aria-label="Client">{opts}</select>'
     else:
-        choix = f'<span class="puce">{_e(d["client_label"])}</span>'
+        client = f'<span class="chip">{_e(d["client_label"])}</span>'
 
-    return f"""<div class="app">
-<aside class="rail">
-  <div class="logo"><i></i><span>{_e(p['nom'])}<small>{_e(p['signature'])}</small></span></div>
-  <nav role="tablist" aria-orientation="vertical">
-    <button class="nav" role="tab" aria-selected="true"  aria-controls="v-res"><b></b>Résultats</button>
-    <button class="nav" role="tab" aria-selected="false" aria-controls="v-req"><b></b>Requêtes</button>
-    <button class="nav" role="tab" aria-selected="false" aria-controls="v-col"><b></b>Collectes</button>
-  </nav>
-  <div class="bas">{choix}
-    <span>Collecte #{d['run_id']} · {d['date']}</span></div>
-</aside>
-<main>
+    return f"""<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600;700&display=swap">
+<div class="wrap">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand__mark" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+          <path d="M2 15 L2 11 M5.2 15 L5.2 8 M8.4 15 L8.4 11 M11.6 15 L11.6 5 M14.8 15 L14.8 11 M18 15 L18 8"
+                stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </div>
+      <div><div class="brand__name">{_e(p['nom'])}</div>
+        <div class="brand__sub">{_e(d['client_label'])}</div></div>
+    </div>
+    <div class="topbar__meta">
+      {client}
+      <span class="chip">Collecte #{d['run_id']} · {_e(d['date'])}</span>
+      <button class="chip nav" role="tab" aria-selected="true" aria-controls="v-res">Résultats</button>
+      <button class="chip nav" role="tab" aria-selected="false" aria-controls="v-req">Requêtes</button>
+      <button class="chip nav" role="tab" aria-selected="false" aria-controls="v-col">Collectes</button>
+    </div>
+  </header>
   <div id="v-res" role="tabpanel">{_vue_resultats(d)}</div>
   <div id="v-req" role="tabpanel" hidden>{_vue_requetes(d)}</div>
   <div id="v-col" role="tabpanel" hidden>{_vue_collectes(d)}</div>
-</main>
 </div>
-<div id="tip" role="status"></div>
 <style>{CSS}</style>
 <script>{JS}</script>"""
 
@@ -728,7 +763,7 @@ def rendu(d: dict) -> str:
 # ------------------------------------------------------------------------ CLI
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Interface du tracker GEO.")
+    ap = argparse.ArgumentParser(description="Interface d'IAmètre.")
     ap.add_argument("--client", default="smart-bpjeps")
     ap.add_argument("--run", type=int)
     ap.add_argument("--db", default=str(db.DEFAULT_DB))
@@ -747,13 +782,14 @@ def main(argv: list[str] | None = None) -> int:
         run_id = ligne["id"]
 
     d = collecte(conn, run_id)
-    out = Path(a.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(rendu(d), encoding="utf-8")
+    Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+    Path(a.out).write_text(rendu(d), encoding="utf-8")
     conn.close()
-    print(f"Interface écrite : {out}")
+
+    delta = "aucune collecte comparable" if d["delta"] is None else f"{d['delta']:+.1f} pts"
+    print(f"Interface écrite : {a.out}")
     print(f"  {d['produit']['nom']} · collecte #{run_id} · {d['resume']['n']} appels · "
-          f"{(d['resume']['rate'] or 0):.0f} % de citation")
+          f"{(d['resume']['rate'] or 0):.0f} % · évolution : {delta}")
     return 0
 
 
