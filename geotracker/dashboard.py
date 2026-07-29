@@ -233,7 +233,7 @@ def _lecture_moteur(m: dict, tous: list[dict]) -> str:
         return "Le plus dur à percer, mais la meilleure place quand la marque y est."
     if m["taux"] <= pire:
         return "Le plus difficile à percer."
-    return f"Bien placée quand la marque y est, rang {m['rang']:.1f}." if m["rang"] else ""
+    return f"Bien placée quand la marque y est, rang {_nb(m['rang'])}." if m["rang"] else ""
 
 
 def _diagnostic(q: dict) -> str:
@@ -256,6 +256,19 @@ def _prochaine_collecte() -> str:
 
 # ---------------------------------------------------------------------- rendu
 
+def _nb(x, dec: int = 1) -> str:
+    """Nombre à la française : virgule décimale. « 10.6 » est une faute en
+    français, et ça saute aux yeux sur un produit qui vise ce marché."""
+    return f"{x:.{dec}f}".replace(".", ",")
+
+
+def _cite(texte: str) -> str:
+    """Guillemets français avec espaces fines insécables : évite le guillemet
+    fermant orphelin en bas de ligne, et respecte la typographie française."""
+    fine = "&#8239;"
+    return f"«{fine}{_e(texte)}{fine}»"
+
+
 def _e(v) -> str:
     return html.escape(str(v), quote=True)
 
@@ -268,9 +281,9 @@ CSS = """
   --signal:#2650F0; --signal-soft:#E8EDFE;
   --alert:#D9482B; --ok:#178A50; --ok-soft:#E6F5EC;
   --opp:#8A6100; --opp-soft:#FFF3D6; --piste:#EDF0F6; --r:16px;
-  --f-display:"Space Grotesk",system-ui,-apple-system,sans-serif;
-  --f-body:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
-  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --f-display:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-body:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
 }
 @media(prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --ink:#EEF1F6; --ink-soft:rgba(238,241,246,.62); --ink-faint:rgba(238,241,246,.38);
@@ -309,11 +322,11 @@ button.chip[aria-selected="true"]{background:var(--ink); color:var(--paper); bor
   align-items:center; margin-bottom:18px}
 .gauge{position:relative; width:210px}
 .gauge svg{display:block; width:100%; height:auto}
-.gauge__value{position:absolute; left:0; right:0; top:56%; text-align:center;
+.gauge__value{position:absolute; left:0; right:0; top:58%; text-align:center;
   font-family:var(--f-mono); font-weight:700; font-size:2.9rem; letter-spacing:-.04em; line-height:1}
 .gauge__value small{font-size:1.1rem; font-weight:600; color:var(--ink-soft)}
-.gauge__label{position:absolute; left:0; right:0; top:82%; text-align:center; font-size:.72rem;
-  font-weight:600; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.1em}
+.eyebrow{font-size:.7rem; font-weight:700; color:var(--ink-faint);
+  text-transform:uppercase; letter-spacing:.12em; margin-bottom:10px}
 .hero__mid h1{font-family:var(--f-display); font-weight:700; font-size:1.45rem;
   letter-spacing:-.02em; line-height:1.25; margin-bottom:6px}
 .hero__mid p{color:var(--ink-soft); font-size:.92rem; max-width:50ch}
@@ -365,11 +378,13 @@ button.chip[aria-selected="true"]{background:var(--ink); color:var(--paper); bor
 
 .queue{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:18px}
 .queue__card{background:var(--paper); border:1px solid var(--line); border-radius:var(--r);
-  padding:18px 20px; display:flex; gap:16px; align-items:center; justify-content:space-between}
+  padding:18px 20px; display:flex; gap:18px; align-items:flex-start;
+  justify-content:space-between}
+.queue__txt{min-width:0}
 .queue__txt h3{font-size:.95rem; font-weight:700; margin-bottom:3px}
 .queue__txt p{font-size:.82rem; color:var(--ink-soft)}
 .queue__rate{font-family:var(--f-mono); font-weight:700; font-size:1.05rem; color:var(--alert);
-  white-space:nowrap}
+  white-space:nowrap; flex:none; line-height:1.5}
 .queue__rate--warn{color:var(--opp)}
 
 .grid{display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:18px}
@@ -501,7 +516,7 @@ def _brief(q: dict, d: dict) -> str:
     lignes += [
         "",
         f"Impact estimé si ce sujet atteint le niveau des sujets qui fonctionnent : "
-        f"+{_impact(q, d['requetes'], d['resume']):.1f} points de taux de citation global.",
+        f"+{_nb(_impact(q, d['requetes'], d['resume']))} points de taux de citation global.",
     ]
     return "\n".join(lignes)
 
@@ -526,8 +541,8 @@ def _vue_resultats(d: dict) -> str:
     else:
         haut = d["delta"] >= 0
         badge = (f'<span class="delta delta--{"up" if haut else "down"}">'
-                 f'{"▲" if haut else "▼"} {abs(d["delta"]):.1f} pts</span>')
-        phrase = f"{'▲' if haut else '▼'} {abs(d['delta']):.1f} points depuis la collecte précédente."
+                 f'{"▲" if haut else "▼"} {_nb(abs(d["delta"]))} pts</span>')
+        phrase = f"{'▲' if haut else '▼'} {_nb(abs(d['delta']))} points depuis la collecte précédente."
 
     reste_txt = f"<strong>+{reste:.0f} pts restants</strong>"
     if contenus:
@@ -543,12 +558,12 @@ def _vue_resultats(d: dict) -> str:
   <section class="mission">
     <div>
       <div class="mission__eyebrow">Ta prochaine action · opportunité n°1</div>
-      <h2>« {_e(cible['texte'])} »</h2>
+      <h2>{_cite(cible['texte'])}</h2>
       <p>{_e(_diagnostic(cible))} {_e(contexte)}
       <strong>C'est le sujet où un contenu rapporterait le plus.</strong></p>
     </div>
     <div class="mission__side">
-      <div class="mission__impact">+{_impact(cible, d['requetes'], r):.1f} pts<small>impact estimé</small></div>
+      <div class="mission__impact">+{_nb(_impact(cible, d["requetes"], r))} pts<small>impact estimé</small></div>
       <button class="btn btn--primary" data-brief="{_e(_brief(cible, d))}">Copier le brief</button>
     </div>
   </section>"""
@@ -556,7 +571,7 @@ def _vue_resultats(d: dict) -> str:
     suite = [q for q in trous if cible is None or q["id"] != cible["id"]][:2]
     queue = "".join(
         f'<article class="queue__card"><div class="queue__txt">'
-        f'<h3>« {_e(q["texte"])} »</h3><p>{_e(_diagnostic(q))}</p></div>'
+        f'<h3>{_cite(q["texte"])}</h3><p>{_e(_diagnostic(q))}</p></div>'
         f'<div class="queue__rate{" queue__rate--warn" if q["taux"] >= 10 else ""}">'
         f'{q["taux"]:.0f} %</div></article>'
         for q in suite
@@ -568,14 +583,14 @@ def _vue_resultats(d: dict) -> str:
         cls = "is-you" if v["moi"] else ("is-chaser" if v is poursuivant else "")
         ecart = ""
         if v is poursuivant and moi and place == 1:
-            ecart = (f'<span class="lb__gap">à {moi["part"] - v["part"]:.1f} pts '
+            ecart = (f'<span class="lb__gap">à {_nb(moi["part"] - v["part"])} pts '
                      f'derrière la marque</span>')
         sous = v["label"] or ("la marque suivie" if v["moi"] else "")
         lb += (f'<li class="{cls}"><span class="lb__rank">{i}</span>'
                f'<span class="lb__dom">{_e(v["domaine"])}'
                + (f"<small>{_e(sous)}</small>" if sous else "")
                + f'</span><span class="lb__bar"><i style="width:{v["part"] / tete * 100:.0f}%"></i>'
-               f'</span><span class="lb__part">{v["part"]:.1f} %</span>{ecart}</li>')
+               f'</span><span class="lb__part">{_nb(v["part"])} %</span>{ecart}</li>')
 
     st = "".join(
         f'<li><h3>{_e(q["texte"])} <span>{q["taux"]:.0f} %</span></h3>'
@@ -611,7 +626,7 @@ def _vue_resultats(d: dict) -> str:
     L = 267
     lead_voix = (
         f"La marque domine, mais <strong>{_e(poursuivant['domaine'])} n'est "
-        f"qu'à {moi['part'] - poursuivant['part']:.1f} pts</strong>."
+        f"qu'à {_nb(moi['part'] - poursuivant['part'])} pts</strong>."
         if moi and poursuivant and place == 1
         else "Répartition des citations relevées pendant la collecte."
     )
@@ -633,10 +648,10 @@ def _vue_resultats(d: dict) -> str:
               stroke-width="14" stroke-linecap="round" stroke-dasharray="{L * taux / 100:.1f} {L}"/>
       </svg>
       <div class="gauge__value">{taux:.0f}<small>%</small></div>
-      <div class="gauge__label">Visibilité IA</div>
     </div>
     <div class="hero__mid">
       <h1>{titre}{badge}</h1>
+      <p class="eyebrow">Visibilité IA</p>
       <p>Mesuré sur <strong>{r['n']} appels</strong>, {len(d['moteurs'])} moteurs. {_e(phrase)}</p>
       <div class="ruler">
         <div class="ruler__track">
@@ -652,9 +667,9 @@ def _vue_resultats(d: dict) -> str:
     <div class="hero__side">
       <div class="stat stat--crown"><div class="stat__num">{place or "—"}<sup>{"re" if place == 1 else "e"}</sup></div>
         <div class="stat__lbl">sur {d['domaines_distincts']} domaines cités</div></div>
-      <div class="stat"><div class="stat__num">{f"{moi['part']:.1f} %" if moi else "n/d"}</div>
+      <div class="stat"><div class="stat__num">{_nb(moi["part"]) + " %" if moi else "n/d"}</div>
         <div class="stat__lbl">part de voix</div></div>
-      <div class="stat"><div class="stat__num">{f"{r['avg_rank']:.1f}" if r['avg_rank'] else "n/d"}</div>
+      <div class="stat"><div class="stat__num">{_nb(r["avg_rank"]) if r["avg_rank"] else "n/d"}</div>
         <div class="stat__lbl">rang moyen dans les sources</div></div>
     </div>
   </section>
@@ -730,10 +745,7 @@ def rendu(d: dict) -> str:
     else:
         client = f'<span class="chip">{_e(d["client_label"])}</span>'
 
-    return f"""<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600;700&display=swap">
-<div class="wrap">
+    return f"""<div class="wrap">
   <header class="topbar">
     <div class="brand">
       <div class="brand__mark" aria-hidden="true">
