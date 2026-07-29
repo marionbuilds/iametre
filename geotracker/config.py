@@ -10,6 +10,21 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 CLIENTS_DIR = ROOT / "config" / "clients"
+PRODUIT_YAML = ROOT / "config" / "produit.yaml"
+
+
+def load_produit() -> dict:
+    """Identité du produit. Un seul endroit : renommer coûte une ligne."""
+    defaut = {"nom": "Tracker GEO", "signature": ""}
+    if not PRODUIT_YAML.exists():
+        return defaut
+    return {**defaut, **(yaml.safe_load(PRODUIT_YAML.read_text(encoding="utf-8")) or {})}
+
+
+def clients_disponibles() -> list[str]:
+    """Le schéma est multi-clients depuis le premier jour : un client s'ajoute
+    par un fichier YAML, sans migration. L'interface le rend visible."""
+    return sorted(p.stem for p in CLIENTS_DIR.glob("*.yaml"))
 
 
 @dataclass
