@@ -19,7 +19,32 @@ from ..config import ClientConfig, Engine
 from ..models import EngineResponse, Source, normalize_domain
 
 ENDPOINT = "https://api.dataforseo.com/v3/serp/google/organic/live/advanced"
-TIMEOUT = 180.0
+TIMEOUT = 240.0
+MAX_RETRIES = 3
+
+# `40101 Internal SE Server Error` est une panne PASSAGÈRE côté DataForSEO,
+# pas une erreur de notre requête : mesuré le 28/07, le même appel échoue puis
+# réussit à l'essai suivant. Sans reprise, on perdrait des points de mesure au
+# hasard, ce qui creuserait des trous dans la série.
+ERREURS_PASSAGERES = {40101, 40102, 50000, 50100, 50200}
+
+# `depth` réduit = SERP plus courte à assembler, donc AI Overview plus fiable
+# ET plus riche : mesuré 10 références avec depth 10, contre 2 avec depth 20.
+DEPTH = 10
+
+
+def _post_avec_reprise(body: list) -> tuple[httpx.Response, dict]:
+    """Rejoue l'appel quand DataForSEO renvoie une panne passagère."""
+    auth = (os.environ["DATAFORSEO_LOGIN"], os.environ["DATAFORSEO_PASSWORD"])
+    response = payload = None
+    for tentative in range(MAX_RETRIES):
+        response = httpx.post(ENDPOINT, auth=auth, json=body, timeout=TIMEOUT)
+        payload = response.json()
+        codes = {t.get("status_code") for t in (payload.get("tasks") or [])}
+        if not (codes & ERREURS_PASSAGERES) or tentative == MAX_RETRIES - 1:
+            return response, payload
+        time.sleep(3 * (tentative + 1))
+    return response, payload
 
 
 def ask(prompt_text: str, engine: Engine, config: ClientConfig) -> EngineResponse:
@@ -32,17 +57,15 @@ def ask(prompt_text: str, engine: Engine, config: ClientConfig) -> EngineRespons
     started = time.perf_counter()
 
     try:
-        response = httpx.post(
-            ENDPOINT,
-            auth=(os.environ["DATAFORSEO_LOGIN"], os.environ["DATAFORSEO_PASSWORD"]),
-            json=[
+        response, payload = _post_avec_reprise(
+            [
                 {
                     "keyword": prompt_text,
                     "location_name": config.country,
                     "language_code": config.locale.split("-")[0],
                     "device": "desktop",
                     "os": "windows",
-                    "depth": 20,
+                    "depth": DEPTH,
                     "load_html": False,
                     # Google charge souvent l'AI Overview APRÈS l'affichage de
                     # la page. Sans ce champ, DataForSEO ne renvoie qu'un
@@ -51,10 +74,8 @@ def ask(prompt_text: str, engine: Engine, config: ClientConfig) -> EngineRespons
                     # l'AI Overview existait bel et bien.
                     "load_async_ai_overview": True,
                 }
-            ],
-            timeout=TIMEOUT,
+            ]
         )
-        payload = response.json()
         result.raw = payload
 
         if response.status_code >= 400:
