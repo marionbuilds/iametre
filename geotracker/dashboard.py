@@ -229,6 +229,17 @@ def _marge(r: dict) -> float:
     return 1.96 * math.sqrt(prop * (1 - prop) / r["ok"]) * 100
 
 
+def _promesse(imp: float) -> str:
+    """Formule une promesse d'impact en borne basse (principe Apple, décidé
+    par Marion le 29/07/2026) : on arrondit l'estimation VERS LE BAS et on
+    dit « au moins ». Si le réel dépasse, c'est du bonus perçu ; s'il colle,
+    la promesse est tenue. Ne s'applique qu'aux promesses : les mesures
+    (taux, parts de voix), elles, restent exactes au dixième."""
+    if imp >= 1:
+        return f"au moins +{int(imp)} pts"
+    return f"+{_nb(imp)} pts"
+
+
 def _objectif(taux: float) -> tuple[int, float]:
     palier = min(100, (int(taux // 10) + 1) * 10)
     return palier, palier - taux
@@ -665,7 +676,8 @@ def _brief(q: dict, d: dict) -> str:
     lignes += [
         "",
         f"Impact estimé si ce sujet atteint le niveau des sujets qui fonctionnent : "
-        f"+{_nb(_impact(q, d['requetes'], d['resume']))} points de taux de citation global.",
+        f"{_promesse(_impact(q, d['requetes'], d['resume']))} de taux de citation global "
+        f"(borne basse volontaire).",
     ]
     return "\n".join(lignes)
 
@@ -690,7 +702,7 @@ CONTEXTE MESURÉ ({d['produit']['nom']}, le {d['date']})
 - Marque à faire citer : {d['client_label']}.
 - Sur cette question, la marque n'apparaît que dans {q['cites']} réponse(s) d'IA sur {q['ok']} testées ({taux} %).
 - {terrain}
-- Impact estimé d'un bon contenu : +{_nb(_impact(q, d['requetes'], d['resume']))} points de visibilité IA globale.
+- Impact estimé d'un bon contenu : {_promesse(_impact(q, d['requetes'], d['resume']))} de visibilité IA globale.
 
 CE QUE TU DOIS PRODUIRE (la structure seulement, pas la rédaction)
 1. Le title SEO et le H1 : la question, formulée comme un humain la pose.
@@ -744,7 +756,7 @@ def _vue_resultats(d: dict) -> str:
 
     reste_txt = f"<strong>+{reste:.0f} pts restants</strong>"
     if contenus:
-        reste_txt += f" · <strong>~{contenus} contenu{'s' if contenus > 1 else ''}</strong>"
+        reste_txt += f" · <strong>{contenus} à {contenus + 1} contenus</strong>"
 
     mission, cible = "", None
     if trous:
@@ -761,7 +773,7 @@ def _vue_resultats(d: dict) -> str:
       <strong>C'est le sujet où un contenu rapporterait le plus.</strong></p>
     </div>
     <div class="mission__side">
-      <div class="mission__impact">+{_nb(_impact(cible, d["requetes"], r))} pts<small>impact estimé</small></div>
+      <div class="mission__impact">{_e(_promesse(_impact(cible, d["requetes"], r)))}<small>impact estimé, borne basse</small></div>
       <div class="mission__acts">
         <button class="btn--ghost" data-copy="{_e(_brief(cible, d))}" data-ok="Brief copié">Copier le brief</button>
         <button class="btn btn--primary" data-copy="{_e(_prompt_ia(cible, d))}" data-ok="Prompt copié, colle-le dans une IA">Copier le prompt d'article</button>
