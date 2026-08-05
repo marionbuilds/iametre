@@ -577,12 +577,13 @@ def _hero(h: dict) -> str:
               stroke-width="14" stroke-linecap="round" stroke-dasharray="{L * taux / 100:.1f} {L}"/>
       </svg>
       <div class="gauge__value">{taux:.0f}<small>%</small>
-        <div class="gauge__perim">{h["n_moteurs"]} moteurs</div></div>
+        <div class="gauge__perim">{h["n_moteurs"]} moteurs de recherche</div></div>
     </div>
     <div class="hero__mid">
       <h2>{h["titre"]}{badge}</h2>
       <p class="eyebrow">Visibilité IA</p>
-      <p>Mesuré sur <strong>{h["appels_reussis"]} appels réussis</strong>, {h["n_moteurs"]} moteurs. {_e(h["phrase"])}</p>
+      <p>Mesuré sur <strong>{h["appels_reussis"]} appels réussis</strong>, {h["n_moteurs"]} moteurs
+      avec recherche web ; la mémoire de marque est suivie à part, hors de ce taux. {_e(h["phrase"])}</p>
       {sante_html}
       <div class="ruler">
         <div class="ruler__track">

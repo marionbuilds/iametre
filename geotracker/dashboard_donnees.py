@@ -90,7 +90,9 @@ def _collecte(conn, run_id: int) -> dict:
     cl_r, pr_r = _exclusion(exclure)          # sur `responses` sans alias
     cl_j, pr_j = _exclusion(exclure, "r.")    # sur les jointures (alias r)
 
-    resume = run_summary(conn, run_id, exclure=exclure)
+    resume = run_summary(conn, run_id, exclure=exclure)          # axe visibilité
+    resume_total = run_summary(conn, run_id, exclure=exclure,
+                               avec_memoire=True)                # totaux de collecte
 
     moteurs = sorted(
         (
@@ -154,7 +156,8 @@ def _collecte(conn, run_id: int) -> dict:
                 """SELECT prompt_id, prompt_text, MAX(prompt_type) AS prompt_type,
                           SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) AS ok,
                           SUM(COALESCE(cited,0)) AS cited
-                   FROM responses WHERE run_id=? GROUP BY prompt_id""",
+                   FROM responses WHERE run_id=? AND search_enabled=1
+                   GROUP BY prompt_id""",
                 (run_id,),
             ).fetchall()
         ),
@@ -205,7 +208,7 @@ def _collecte(conn, run_id: int) -> dict:
                SUM(CASE WHEN COALESCE(cited,0)=1 AND source_rank=1 THEN 1 ELSE 0 END) n1,
                SUM(COALESCE(cited_in_text,0)) t,
                SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) ok
-           FROM responses WHERE run_id=?{cl_r}""",
+           FROM responses WHERE run_id=? AND search_enabled=1{cl_r}""",
         (run_id, *pr_r),
     ).fetchone()
     dominance = dict(cites=dom["c"] or 0, n1=dom["n1"] or 0,
@@ -219,7 +222,8 @@ def _collecte(conn, run_id: int) -> dict:
                        SUM(COALESCE(cited,0)) c,
                        SUM(CASE WHEN COALESCE(cited,0)=1 AND source_rank=1
                            THEN 1 ELSE 0 END) n1
-                   FROM responses WHERE run_id=? AND error IS NULL{cl_r}
+                   FROM responses WHERE run_id=? AND error IS NULL
+                     AND search_enabled=1{cl_r}
                    GROUP BY prompt_id HAVING SUM(COALESCE(cited,0)) > 0""",
                 (run_id, *pr_r),
             ).fetchall()
@@ -268,7 +272,8 @@ def _collecte(conn, run_id: int) -> dict:
                          SELECT 1 FROM sources s WHERE s.response_id=responses.id
                            AND (s.domain=? OR s.domain LIKE '%.'||?)
                        ) THEN 1 ELSE 0 END) lui
-               FROM responses WHERE run_id=?{cl_r} GROUP BY prompt_id""",
+               FROM responses WHERE run_id=? AND search_enabled=1{cl_r}
+               GROUP BY prompt_id""",
             (rival, rival, run_id, *pr_r),
         ).fetchall():
             if r["ok"]:
@@ -296,12 +301,13 @@ def _collecte(conn, run_id: int) -> dict:
         "SELECT id, started_at, note FROM runs WHERE client=? ORDER BY id DESC LIMIT 25",
         (meta["client"],),
     ).fetchall():
-        s = run_summary(conn, r["id"], exclure=exclure)
-        if s["n"]:
+        s_vis = run_summary(conn, r["id"], exclure=exclure)
+        s_tot = run_summary(conn, r["id"], exclure=exclure, avec_memoire=True)
+        if s_tot["n"]:
             historique.append(dict(id=r["id"],
                                    date=r["started_at"][:16].replace("T", " à "),
-                                   note=r["note"] or "", n=s["n"], erreurs=s["errors"],
-                                   taux=s["rate"]))
+                                   note=r["note"] or "", n=s_tot["n"],
+                                   erreurs=s_tot["errors"], taux=s_vis["rate"]))
 
     points, serie_ctx = serie_commune(conn, meta["client"], exclure, reference=run_id)
     serie = [dict(date=p["date"], taux=p["taux"]) for p in points]
@@ -309,7 +315,8 @@ def _collecte(conn, run_id: int) -> dict:
     return {
         "run_id": run_id, "client": meta["client"], "client_label": etiquette,
         "set_version": set_version, "n_concurrents": n_conc,
-        "date": meta["started_at"][:10], "resume": resume, "moteurs": moteurs,
+        "date": meta["started_at"][:10], "resume": resume,
+        "resume_total": resume_total, "moteurs": moteurs,
         "sante": sante, "matrice": matrice,
         "requetes": requetes, "voix": voix,
         "occupants": occupants, "total_citations": total, "domaines_distincts": distincts,
@@ -545,8 +552,9 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
         detail = " · ".join(
             f'{NOMS_COURTS.get(s["id"], s["id"])} {s["ok"]}/{s["total"]}' for s in casses
         )
+        tot = d["resume_total"]
         sante = {"variante": "partielle",
-                 "texte": (f"Collecte complète à {r['ok'] / r['n'] * 100:.0f} % : {detail}. "
+                 "texte": (f"Collecte complète à {tot['ok'] / tot['n'] * 100:.0f} % : {detail}. "
                            f"Les appels perdus sont exclus du calcul, ils ne font pas "
                            f"baisser le taux.")}
     else:
@@ -559,7 +567,9 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
     # restent une preuve : elles vivent à côté de la carte voix.
     hero = {
         "taux": taux,
-        "n_moteurs": len(d["moteurs"]),
+        # Le périmètre du taux : les moteurs AVEC recherche web uniquement.
+        # La mémoire de marque garde sa carte, sur son propre axe.
+        "n_moteurs": sum(1 for m in d["moteurs"] if m["recherche"]),
         "titre": ("Une réponse d'IA sur deux cite la marque" if 45 <= taux <= 55
                   else f"{taux:.0f} % des réponses d'IA citent la marque"),
         "badge": badge,
@@ -766,7 +776,7 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
         "client_initiale": d["client_label"][:1].upper(),
         "run_id": d["run_id"],
         "date": d["date"],
-        "n_appels": r["n"],
+        "n_appels": d["resume_total"]["n"],
         "prochaine_collecte": _prochaine_collecte(date_du_jour),
     }
 

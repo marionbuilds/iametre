@@ -31,11 +31,21 @@ def _delta(current: float | None, previous: float | None) -> str:
     return f"{diff:+.0f} pts"
 
 
-def run_summary(conn, run_id: int, exclure=()) -> dict:
+def run_summary(conn, run_id: int, exclure=(), avec_memoire: bool = False) -> dict:
     """`exclure` : ids des requêtes « en observation », tenues hors des
-    agrégats pour qu'un test de requête ne fasse jamais bouger la série."""
+    agrégats pour qu'un test de requête ne fasse jamais bouger la série.
+
+    ⚠️ AXE DE MESURE (bug de méthode corrigé le 05/08/2026) : par défaut, le
+    taux ne compte que les moteurs AVEC recherche web (`search_enabled = 1`).
+    Une réponse à qui on a interdit de chercher ne mesure pas la visibilité,
+    elle mesure la notoriété : la mémoire de marque vit sur son propre axe et
+    ne s'additionne jamais au taux de visibilité (elle le sous-estimait de
+    7 points). `avec_memoire=True` redonne les totaux de COLLECTE, tous
+    moteurs : à réserver aux compteurs d'appels, jamais à un taux."""
     exclure = tuple(sorted(exclure))
     clause = f" AND prompt_id NOT IN ({','.join('?' * len(exclure))})" if exclure else ""
+    if not avec_memoire:
+        clause += " AND search_enabled=1"
     row = conn.execute(
         f"""
         SELECT COUNT(*) AS n,
@@ -60,11 +70,14 @@ def run_summary(conn, run_id: int, exclure=()) -> dict:
 
 
 def couverture(conn, run_id: int, exclure=()) -> tuple[set, set]:
-    """Moteurs et requêtes réellement présents dans une collecte."""
+    """Moteurs et requêtes réellement présents dans une collecte, SUR L'AXE
+    VISIBILITÉ : seuls les moteurs avec recherche web comptent. La mémoire de
+    marque n'entre ni dans les comparaisons ni dans la courbe (05/08/2026)."""
     exclure = set(exclure)
     engines, prompts = set(), set()
     for row in conn.execute(
-        "SELECT DISTINCT engine_id, prompt_id FROM responses WHERE run_id = ?", (run_id,)
+        "SELECT DISTINCT engine_id, prompt_id FROM responses "
+        "WHERE run_id = ? AND search_enabled=1", (run_id,)
     ):
         if row["prompt_id"] in exclure:
             continue
@@ -188,18 +201,20 @@ def report_run(conn, run_id: int, comp: dict | None) -> None:
         print(f"Run #{run_id} introuvable.")
         return
 
-    current = run_summary(conn, run_id)
+    current = run_summary(conn, run_id)                       # axe visibilité
+    total = run_summary(conn, run_id, avec_memoire=True)      # totaux de collecte
 
     print(f"\n# Run #{run_id} — {meta['client']} — {meta['started_at']}")
     print(f"Set de requêtes v{meta['set_version']}")
 
-    # Le delta vit sur SA ligne, avec SON périmètre (règle du 05/08) : le taux
-    # de citation mesure la collecte entière, l'évolution mesure le périmètre
-    # commun. Les coller sur une même ligne mélangeait deux mesures.
+    # Le delta vit sur SA ligne, avec SON périmètre (règle du 05/08), et le
+    # taux de visibilité porte le sien : moteurs avec recherche web seulement,
+    # la mémoire de marque est un axe à part (correction du 05/08).
     print("\n## Vue d'ensemble")
-    print(f"  Appels réussis        : {current['ok']}/{current['n']}"
-          + (f"  ⚠️ {current['errors']} erreurs" if current["errors"] else ""))
-    print(f"  Taux de citation      : {_pct(current['cited'], current['ok'])}")
+    print(f"  Appels réussis        : {total['ok']}/{total['n']}"
+          + (f"  ⚠️ {total['errors']} erreurs" if total["errors"] else ""))
+    print(f"  Taux de visibilité    : {_pct(current['cited'], current['ok'])}  "
+          f"(moteurs avec recherche web : {current['cited']}/{current['ok']})")
     if comp:
         a = taux_commun(conn, run_id, comp["engines"], comp["prompts"])
         b = taux_commun(conn, comp["prev_id"], comp["engines"], comp["prompts"])
@@ -233,13 +248,13 @@ def report_run(conn, run_id: int, comp: dict | None) -> None:
         print(f"  {row['engine_id']:<20} {mode}  "
               f"{_pct(row['cited'], row['ok']):>5}  ({row['cited']}/{row['ok']})  {rank}")
 
-    print("\n## Par requête  (cité / appels réussis)")
+    print("\n## Par requête  (cité / appels réussis, moteurs avec recherche)")
     rows = conn.execute(
         """
         SELECT prompt_id, prompt_text,
                SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) AS ok,
                SUM(COALESCE(cited, 0)) AS cited
-        FROM responses WHERE run_id = ?
+        FROM responses WHERE run_id = ? AND search_enabled=1
         GROUP BY prompt_id ORDER BY cited * 1.0 / MAX(ok, 1) DESC, prompt_id
         """,
         (run_id,),
