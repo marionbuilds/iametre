@@ -14,6 +14,7 @@ import argparse
 import sys
 
 from . import db
+from .config import load_client
 from .run import load_dotenv
 
 
@@ -58,25 +59,139 @@ def run_summary(conn, run_id: int, exclure=()) -> dict:
     }
 
 
-def report_run(conn, run_id: int, previous_id: int | None) -> None:
+def couverture(conn, run_id: int, exclure=()) -> tuple[set, set]:
+    """Moteurs et requêtes réellement présents dans une collecte."""
+    exclure = set(exclure)
+    engines, prompts = set(), set()
+    for row in conn.execute(
+        "SELECT DISTINCT engine_id, prompt_id FROM responses WHERE run_id = ?", (run_id,)
+    ):
+        if row["prompt_id"] in exclure:
+            continue
+        engines.add(row["engine_id"])
+        prompts.add(row["prompt_id"])
+    return engines, prompts
+
+
+def taux_commun(conn, run_id: int, engines, prompts) -> dict:
+    """`run_summary` restreint à un périmètre (moteurs, requêtes) imposé."""
+    engines, prompts = tuple(sorted(engines)), tuple(sorted(prompts))
+    if not engines or not prompts:
+        return {"n": 0, "ok": 0, "errors": 0, "cited": 0, "rate": None, "avg_rank": None}
+    row = conn.execute(
+        f"""
+        SELECT COUNT(*) AS n,
+               SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) AS ok,
+               SUM(COALESCE(cited, 0)) AS cited,
+               AVG(source_rank) AS avg_rank
+        FROM responses WHERE run_id = ?
+          AND engine_id IN ({','.join('?' * len(engines))})
+          AND prompt_id IN ({','.join('?' * len(prompts))})
+        """,
+        (run_id, *engines, *prompts),
+    ).fetchone()
+    n, ok = row["n"] or 0, row["ok"] or 0
+    return {"n": n, "ok": ok, "errors": n - ok, "cited": row["cited"] or 0,
+            "rate": (row["cited"] or 0) / ok * 100 if ok else None,
+            "avg_rank": row["avg_rank"]}
+
+
+def collecte_comparable(conn, run_id: int, client: str, exclure=()) -> dict | None:
+    """La collecte antérieure la plus récente MESURABLE face à `run_id`.
+
+    L'UNIQUE règle de comparaison du produit : le dashboard et le rapport
+    texte passent tous les deux par ici. Deux collectes sont comparables sur
+    leur PÉRIMÈTRE COMMUN : les requêtes communes doivent couvrir toutes les
+    requêtes titulaires de la collecte courante, et au moins un moteur doit
+    être partagé. Le delta se calcule ensuite pour les DEUX collectes
+    restreintes à ce périmètre commun ; comparer 255 appels sur 5 moteurs à
+    3 appels sur un seul n'est pas une mesure (bug réel du run #15, 05/08).
+    """
+    eng_cur, pr_cur = couverture(conn, run_id, exclure)
+    if not eng_cur or not pr_cur:
+        return None
+    for row in conn.execute(
+        "SELECT id FROM runs WHERE client = ? AND id < ? ORDER BY id DESC", (client, run_id)
+    ):
+        engines, prompts = couverture(conn, row["id"], exclure)
+        if pr_cur <= prompts and (engines & eng_cur):
+            return {"prev_id": row["id"], "engines": engines & eng_cur,
+                    "prompts": pr_cur, "reduit": (engines & eng_cur) < eng_cur}
+    return None
+
+
+def serie_commune(conn, client: str, exclure=(), reference: int | None = None) -> tuple[list, dict | None]:
+    """La courbe, calculée à PÉRIMÈTRE CONSTANT.
+
+    Un point par jour : le dernier run du jour qui couvre toutes les requêtes
+    titulaires de la collecte de référence. Tous les points sont ensuite
+    mesurés sur les moteurs COMMUNS à l'ensemble de ces runs : chaque point de
+    la courbe est comparable à chaque autre, ou il n'y est pas.
+    """
+    if reference is None:
+        row = conn.execute(
+            "SELECT id FROM runs WHERE client = ? ORDER BY id DESC LIMIT 1", (client,)
+        ).fetchone()
+        if row is None:
+            return [], None
+        reference = row["id"]
+    eng_cur, pr_cur = couverture(conn, reference, exclure)
+    if not eng_cur or not pr_cur:
+        return [], None
+
+    par_jour: dict[str, tuple[int, set]] = {}
+    for row in conn.execute(
+        "SELECT id, DATE(started_at) AS j FROM runs WHERE client = ? ORDER BY id", (client,)
+    ):
+        engines, prompts = couverture(conn, row["id"], exclure)
+        if pr_cur <= prompts and (engines & eng_cur):
+            par_jour[row["j"]] = (row["id"], engines)
+    if not par_jour:
+        return [], None
+
+    eng_serie = set(eng_cur)
+    for _, engines in par_jour.values():
+        eng_serie &= engines
+    if not eng_serie:
+        return [], None
+
+    points = []
+    for jour in sorted(par_jour):
+        run_id, _ = par_jour[jour]
+        t = taux_commun(conn, run_id, eng_serie, pr_cur)
+        if t["rate"] is not None:
+            points.append({"date": jour, "run": run_id, "taux": t["rate"],
+                           "rang": t["avg_rank"]})
+    ctx = {"n_moteurs": len(eng_serie), "n_requetes": len(pr_cur),
+           "reduit": eng_serie < eng_cur}
+    return points, ctx
+
+
+def report_run(conn, run_id: int, comp: dict | None) -> None:
     meta = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
     if meta is None:
         print(f"Run #{run_id} introuvable.")
         return
 
     current = run_summary(conn, run_id)
-    previous = run_summary(conn, previous_id) if previous_id else None
+    delta_txt = ""
+    if comp:
+        a = taux_commun(conn, run_id, comp["engines"], comp["prompts"])
+        b = taux_commun(conn, comp["prev_id"], comp["engines"], comp["prompts"])
+        delta_txt = _delta(a["rate"], b["rate"])
 
     print(f"\n# Run #{run_id} — {meta['client']} — {meta['started_at']}")
     print(f"Set de requêtes v{meta['set_version']}")
-    if previous_id:
-        print(f"Comparé au run #{previous_id}")
+    if comp:
+        print(f"Comparé au run #{comp['prev_id']}, à périmètre commun : "
+              f"{len(comp['engines'])} moteurs, {len(comp['prompts'])} requêtes")
+    else:
+        print("Aucune collecte antérieure comparable : pas d'évolution affichée.")
 
     print("\n## Vue d'ensemble")
     print(f"  Appels réussis        : {current['ok']}/{current['n']}"
           + (f"  ⚠️ {current['errors']} erreurs" if current["errors"] else ""))
-    print(f"  Taux de citation      : {_pct(current['cited'], current['ok'])}"
-          + _delta(current["rate"], previous["rate"] if previous else None))
+    print(f"  Taux de citation      : {_pct(current['cited'], current['ok'])}" + delta_txt)
     if current["avg_rank"]:
         print(f"  Rang moyen en source  : {current['avg_rank']:.1f}")
     if current["avg_position"] is not None:
@@ -153,21 +268,43 @@ def report_run(conn, run_id: int, previous_id: int | None) -> None:
               f"rang {row['avg_rank']:.1f}  {row['domain']}{tag}")
 
 
-def report_serie(conn, client: str) -> None:
+def report_serie(conn, client: str, exclure=()) -> None:
     print(f"\n# Série temporelle — {client}")
     print("C'est ÇA le livrable. Le reste n'est que de la présentation.\n")
-    rows = conn.execute(
-        "SELECT id, started_at FROM runs WHERE client = ? ORDER BY started_at", (client,)
-    ).fetchall()
-    if not rows:
-        print("Aucun run pour ce client.")
+    points, ctx = serie_commune(conn, client, exclure)
+    if not points:
+        print("Aucune collecte complète pour ce client : la série démarre à la première "
+              "collecte couvrant toutes les requêtes titulaires.")
         return
-    print(f"  {'date':<22} {'run':>4}  {'citation':>9}  {'rang moy':>9}")
-    for row in rows:
-        summary = run_summary(conn, row["id"])
-        rate = f"{summary['rate']:.0f} %" if summary["rate"] is not None else "n/a"
-        rank = f"{summary['avg_rank']:.1f}" if summary["avg_rank"] else "-"
-        print(f"  {row['started_at']:<22} #{row['id']:<3}  {rate:>9}  {rank:>9}")
+    print(f"Périmètre constant : {ctx['n_moteurs']} moteurs communs, "
+          f"{ctx['n_requetes']} requêtes titulaires."
+          + (" (des moteurs plus récents sont hors courbe tant qu'une vieille"
+             " collecte ne les a pas)" if ctx["reduit"] else ""))
+    total = conn.execute(
+        "SELECT COUNT(*) n FROM runs WHERE client = ?", (client,)
+    ).fetchone()["n"]
+    print(f"  {'date':<12} {'collecte':>8}  {'citation':>9}  {'rang moy':>9}")
+    for p in points:
+        rank = f"{p['rang']:.1f}" if p["rang"] else "-"
+        print(f"  {p['date']:<12} #{p['run']:<7}  {p['taux']:>7.0f} %  {rank:>9}")
+    ecartees = total - len(points)
+    if ecartees:
+        print(f"  ({ecartees} collecte(s) écartée(s) : périmètre non comparable, "
+              "tests ou collectes partielles)")
+
+
+def exclusions_client(client: str) -> frozenset:
+    """Ids des requêtes « en observation », tenues hors de toute comparaison.
+    Une config illisible ARRÊTE le rapport : un chiffre calculé sans les
+    statuts serait faux en silence."""
+    try:
+        cfg = load_client(client)
+    except FileNotFoundError:
+        raise SystemExit(f"Client '{client}' sans fichier de configuration : rapport annulé.")
+    except Exception as exc:
+        raise SystemExit(f"Configuration '{client}' illisible ({exc}) : rapport annulé "
+                         "plutôt que faux.")
+    return frozenset(p.id for p in cfg.prompts if p.statut == "observation")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -180,24 +317,22 @@ def main(argv: list[str] | None = None) -> int:
 
     load_dotenv()
     conn = db.connect(args.db)
+    exclure = exclusions_client(args.client)
 
     if args.serie:
-        report_serie(conn, args.client)
+        report_serie(conn, args.client, exclure)
         return 0
 
-    ids = [
-        r["id"]
-        for r in conn.execute(
-            "SELECT id FROM runs WHERE client = ? ORDER BY id DESC LIMIT 2", (args.client,)
-        ).fetchall()
-    ]
-    if not ids:
+    dernier = conn.execute(
+        "SELECT id FROM runs WHERE client = ? ORDER BY id DESC LIMIT 1", (args.client,)
+    ).fetchone()
+    if dernier is None:
         print("Aucun run enregistré. Lance : python -m geotracker.run")
         return 1
 
-    run_id = args.run or ids[0]
-    previous = next((i for i in ids if i < run_id), None)
-    report_run(conn, run_id, previous)
+    run_id = args.run or dernier["id"]
+    comp = collecte_comparable(conn, run_id, args.client, exclure)
+    report_run(conn, run_id, comp)
     conn.close()
     return 0
 

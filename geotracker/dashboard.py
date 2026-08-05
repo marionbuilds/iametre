@@ -31,7 +31,7 @@ from urllib.parse import urlparse
 
 from . import db
 from .config import ROOT, clients_disponibles, load_client, load_produit
-from .report import run_summary
+from .report import collecte_comparable, couverture, run_summary, serie_commune, taux_commun
 
 SORTIE = ROOT / "reports" / "dashboard.html"
 SEUIL_TROU = 25.0
@@ -64,36 +64,32 @@ def _exclusion(exclure, prefixe: str = "") -> tuple[str, tuple]:
     return f" AND {prefixe}prompt_id NOT IN ({','.join('?' * len(ids))})", ids
 
 
-def _perimetre(conn, run_id: int, exclure=frozenset()) -> tuple[int, str]:
-    """Signature d'une collecte : nombre de requêtes TITULAIRES + moteurs.
-    Deux collectes ne sont comparables que si leur périmètre est identique,
-    sinon un « +3 points » ne voudrait strictement rien dire. Les requêtes en
-    observation sont ignorées : en tester une ne casse pas la comparabilité."""
-    clause, params = _exclusion(exclure)
-    r = conn.execute(
-        f"""SELECT COUNT(DISTINCT prompt_id) p, GROUP_CONCAT(DISTINCT engine_id) e
-           FROM responses WHERE run_id=?{clause}""",
-        (run_id, *params),
-    ).fetchone()
-    return r["p"] or 0, r["e"] or ""
-
-
 def collecte(conn, run_id: int) -> dict:
     meta = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
     if meta is None:
         raise SystemExit(f"Collecte #{run_id} introuvable.")
 
     # La config d'abord : elle porte le statut des requêtes (titulaire ou en
-    # observation) et le rival du duel. Sans elle, tout reste titulaire.
+    # observation) et le rival du duel. Une config illisible ARRÊTE la
+    # génération : une page sans concurrents, sans rival et sans statuts
+    # serait silencieusement FAUSSE, et en prestation c'est un rapport faux
+    # envoyé à un client. On échoue bruyamment, on ne dégrade jamais.
     try:
         cfg = load_client(meta["client"])
-        etiquette, set_version, n_conc = cfg.label, cfg.set_version, len(cfg.competitors)
-        statuts = {p.id: p.statut for p in cfg.prompts}
-        rival = cfg.rival
-        rival_label = (cfg.competitor_label(rival) or rival) if rival else None
-    except Exception:
-        etiquette, set_version, n_conc = meta["client"], meta["set_version"], 0
-        statuts, rival, rival_label = {}, None, None
+    except FileNotFoundError:
+        raise SystemExit(
+            f"Client '{meta['client']}' sans fichier de configuration "
+            f"(config/clients/{meta['client']}.yaml) : interface non générée."
+        )
+    except Exception as exc:
+        raise SystemExit(
+            f"Configuration '{meta['client']}' illisible ({type(exc).__name__}: {exc}) : "
+            "interface non générée plutôt que fausse."
+        )
+    etiquette, set_version, n_conc = cfg.label, cfg.set_version, len(cfg.competitors)
+    statuts = {p.id: p.statut for p in cfg.prompts}
+    rival = cfg.rival
+    rival_label = (cfg.competitor_label(rival) or rival) if rival else None
     exclure = frozenset(i for i, s in statuts.items() if s == "observation")
     cl_r, pr_r = _exclusion(exclure)          # sur `responses` sans alias
     cl_j, pr_j = _exclusion(exclure, "r.")    # sur les jointures (alias r)
@@ -288,20 +284,19 @@ def collecte(conn, run_id: int) -> dict:
         # Les requêtes où le rival fait mieux d'abord : c'est là qu'on agit.
         duel.sort(key=lambda x: x["lui"] - x["moi"], reverse=True)
 
-    # Comparaison avec la collecte précédente DE MÊME PÉRIMÈTRE uniquement.
-    signature = _perimetre(conn, run_id, exclure)
-    precedent = None
-    for r in conn.execute(
-        "SELECT id FROM runs WHERE client=? AND id<? ORDER BY id DESC", (meta["client"], run_id)
-    ).fetchall():
-        if _perimetre(conn, r["id"], exclure) == signature:
-            precedent = r["id"]
-            break
-    delta = None
-    if precedent is not None:
-        avant = run_summary(conn, precedent, exclure=exclure)["rate"]
-        if avant is not None and resume["rate"] is not None:
-            delta = resume["rate"] - avant
+    # Comparaison et série : LA règle commune du produit vit dans report.py
+    # (collecte_comparable / serie_commune). Le dashboard et le rapport texte
+    # l'appellent tous les deux ; deux sorties, un seul cerveau.
+    eng_cur, _ = couverture(conn, run_id, exclure)
+    comp = collecte_comparable(conn, run_id, meta["client"], exclure)
+    delta, delta_ctx = None, None
+    if comp is not None:
+        a = taux_commun(conn, run_id, comp["engines"], comp["prompts"])
+        b = taux_commun(conn, comp["prev_id"], comp["engines"], comp["prompts"])
+        if a["rate"] is not None and b["rate"] is not None:
+            delta = a["rate"] - b["rate"]
+            delta_ctx = {"prev_id": comp["prev_id"], "n_moteurs": len(comp["engines"]),
+                         "reduit": comp["reduit"], "resume": a}
 
     historique = []
     for r in conn.execute(
@@ -315,18 +310,8 @@ def collecte(conn, run_id: int) -> dict:
                                    note=r["note"] or "", n=s["n"], erreurs=s["errors"],
                                    taux=s["rate"]))
 
-    # Série : un point par JOUR, et seulement les collectes de même périmètre.
-    serie = []
-    for ligne in conn.execute(
-        """SELECT DATE(started_at) j, MAX(id) dernier FROM runs
-           WHERE client=? GROUP BY DATE(started_at) ORDER BY j""",
-        (meta["client"],),
-    ).fetchall():
-        if _perimetre(conn, ligne["dernier"], exclure) != signature:
-            continue
-        t = run_summary(conn, ligne["dernier"], exclure=exclure)["rate"]
-        if t is not None:
-            serie.append(dict(date=ligne["j"], taux=t))
+    points, serie_ctx = serie_commune(conn, meta["client"], exclure, reference=run_id)
+    serie = [dict(date=p["date"], taux=p["taux"]) for p in points]
 
     return {
         "run_id": run_id, "client": meta["client"], "client_label": etiquette,
@@ -338,6 +323,7 @@ def collecte(conn, run_id: int) -> dict:
         "dominance": dominance, "dominance_requetes": dominance_requetes,
         "pages": pages, "duel": duel, "rival": rival, "rival_label": rival_label,
         "historique": historique, "serie": serie, "delta": delta,
+        "delta_ctx": delta_ctx, "serie_ctx": serie_ctx,
         "produit": load_produit(),
     }
 
@@ -830,16 +816,36 @@ table.d tr:last-child td{border-bottom:none}
 # Le test 6 de tests_smoke.py monte la garde (node --check).
 JS = r"""
 (function(){
+  // navigator.clipboard n'existe qu'en contexte securise (https, localhost).
+  // Ce fichier s'ouvre en file:// : le repli execCommand est donc le chemin
+  // NORMAL ici, pas un cas rare. Et si tout echoue, on le DIT au lieu de
+  // laisser un bouton mort.
+  function copier(texte, apres){
+    function secours(){
+      var ta=document.createElement('textarea');
+      ta.value=texte;
+      ta.setAttribute('readonly','');
+      ta.style.position='fixed';
+      ta.style.top='-1000px';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      var reussi=false;
+      try{reussi=document.execCommand('copy');}catch(e){reussi=false;}
+      document.body.removeChild(ta);
+      apres(reussi);
+    }
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(texte).then(function(){apres(true);},secours);
+    }else{secours();}
+  }
   document.querySelectorAll('[data-copy]').forEach(function(b){
     b.addEventListener('click',function(){
-      var self=this, texte=this.getAttribute('data-copy'),
-          ok=this.getAttribute('data-ok')||'Copié', avant=this.textContent;
-      if(navigator.clipboard&&navigator.clipboard.writeText){
-        navigator.clipboard.writeText(texte).then(function(){
-          self.textContent=ok;
-          setTimeout(function(){self.textContent=avant;},1800);
-        });
-      }
+      var self=this, ok=this.getAttribute('data-ok')||'Copié', avant=this.textContent;
+      copier(this.getAttribute('data-copy'),function(reussi){
+        self.textContent=reussi?ok:'Copie impossible dans ce navigateur';
+        setTimeout(function(){self.textContent=avant;},reussi?1800:3200);
+      });
     });
   });
   var nav=[].slice.call(document.querySelectorAll('.nav'));
@@ -1157,20 +1163,30 @@ def _vue_resultats(d: dict) -> str:
     contenus = math.ceil(reste / moyen) if moyen > 0.2 else None
 
     marge = _marge(r)
+    ctx = d.get("delta_ctx")
+    # La marge du VERDICT se calcule sur l'échantillon effectivement comparé
+    # (le périmètre commun), pas sur la collecte entière.
+    marge_cmp = _marge(ctx["resume"]) if ctx else marge
+    note_perim = ""
+    if ctx and ctx["reduit"]:
+        note_perim = (f" Comparaison avec la collecte #{ctx['prev_id']}, sur leurs "
+                      f"{ctx['n_moteurs']} moteurs communs.")
     if d["delta"] is None:
         badge = ""
-        phrase = "Première collecte de ce périmètre : la courbe démarre ici."
-    elif abs(d["delta"]) <= marge:
+        phrase = "Aucune collecte antérieure comparable : la courbe démarre ici."
+    elif abs(d["delta"]) <= marge_cmp:
         # Dans la marge de fluctuation : ni victoire ni alerte, on le DIT.
         badge = '<span class="delta delta--flat">≈ stable</span>'
         phrase = (f"Variation de {_nb(abs(d['delta']))} pt(s) : dans la marge de fluctuation "
-                  f"normale (±{_nb(marge)} pts), ce n'est ni une progression ni un recul.")
+                  f"normale (±{_nb(marge_cmp)} pts), ce n'est ni une progression ni un recul."
+                  + note_perim)
     else:
         haut = d["delta"] >= 0
         badge = (f'<span class="delta delta--{"up" if haut else "down"}">'
                  f'{"▲" if haut else "▼"} {_nb(abs(d["delta"]))} pts</span>')
         phrase = (f"{'▲' if haut else '▼'} {_nb(abs(d['delta']))} points depuis la collecte "
-                  f"précédente, au-delà de la marge de ±{_nb(marge)} pts : le mouvement est réel.")
+                  f"précédente, au-delà de la marge de ±{_nb(marge_cmp)} pts : le mouvement "
+                  f"est réel." + note_perim)
 
     # Santé de la collecte. Un moteur qui tombe ne fait PAS échouer le job : il
     # est sauté proprement et creuse un trou muet dans la série. Le seul
@@ -1497,12 +1513,19 @@ def _courbe(d: dict, marge: float) -> str:
     etiquette = (f'<text x="{xs[-1]:.1f}" y="{y(dernier["taux"]) - 12:.1f}" text-anchor="end" '
                  f'class="curve__val">{dernier["taux"]:.0f} %</text>')
 
+    sctx = d.get("serie_ctx")
+    note_serie = ""
+    if sctx and sctx["reduit"]:
+        note_serie = (f" Courbe à <strong>périmètre constant</strong> : les "
+                      f"{sctx['n_moteurs']} moteurs communs à toutes les collectes ; "
+                      f"un moteur ajouté en route entre dans la courbe quand toutes "
+                      f"les collectes affichées l'ont.")
     return f"""<section class="card">
   <div class="card__head"><h2>Courbe de visibilité</h2>
     <span class="card__hint">bande grisée : marge de fluctuation ±{_nb(marge)} pts</span></div>
   <p class="card__lead">Tant que la ligne reste dans sa bande, la mesure est <strong>stable</strong> :
   l'oscillation est le comportement normal d'une réponse d'IA, pas un recul.
-  Le vrai signal, c'est la tendance sur 3-4 collectes.</p>
+  Le vrai signal, c'est la tendance sur 3-4 collectes.{note_serie}</p>
   <svg class="curve" viewBox="0 0 {W} {H}" role="img"
        aria-label="Courbe du taux de citation avec sa marge de fluctuation">
     <line x1="{PAD}" y1="{y(50):.1f}" x2="{W - PAD}" y2="{y(50):.1f}" class="curve__mid"/>
