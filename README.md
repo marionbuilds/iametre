@@ -1,4 +1,4 @@
-# Tracker GEO
+# IAmètre
 
 Un outil de mesure de la visibilité d'une marque dans les réponses des IA génératives : ChatGPT, Claude, Perplexity et Google AI Overviews. Construit et utilisé sur mes propres sites.
 

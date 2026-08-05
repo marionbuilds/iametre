@@ -522,7 +522,7 @@ JS = r"""
     if(envoyer){
       var corps='Requetes a ajouter au jeu de suivi (statut : en observation) :\n\n'
                 +l.map(function(q){return '- '+q;}).join('\n');
-      envoyer.href='https://github.com/marionbuilds/tracker-geo/issues/new'
+      envoyer.href='https://github.com/marionbuilds/iametre/issues/new'
         +'?title='+encodeURIComponent('Ajout de requetes au jeu de suivi')
         +'&body='+encodeURIComponent(corps);
     }
