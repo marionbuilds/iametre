@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -148,13 +147,3 @@ def load_client(name: str) -> ClientConfig:
         repetitions_ai_overview=int(sampling.get("repetitions_ai_overview", 3)),
         path=path,
     )
-
-
-def require_env(*names: str) -> None:
-    missing = [n for n in names if not os.environ.get(n)]
-    if missing:
-        raise RuntimeError(
-            "Variables d'environnement manquantes : "
-            + ", ".join(missing)
-            + ". Copie .env.example en .env et remplis-le."
-        )

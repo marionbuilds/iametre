@@ -1,18 +1,10 @@
-"""ChatGPT, via l'API OpenAI.
+"""ChatGPT, via l'API OpenAI (chat completions, modèles *-search-preview).
 
-Deux formes d'API, incompatibles entre elles, choisies par `engine.api` :
-
-  `chat_completions`  modèles *-search-preview. La recherche est faite côté
-                      serveur et n'est PAS facturée en tokens.
-                      Mesuré le 28/07 : 48 tokens d'entrée par appel.
-
-  `responses`         gpt-5 & co. L'outil de recherche renvoie les pages
-                      lues dans le contexte facturé.
-                      Mesuré le 28/07 : 29 034 tokens d'entrée par appel,
-                      soit 600 fois plus, et la limite de débit explose.
-
-Les deux sont maintenues : la première pour le coût, la seconde parce que les
-modèles « preview » peuvent disparaître et qu'il faudra alors un repli.
+La recherche web est faite côté serveur et n'est PAS facturée en tokens :
+mesuré le 28/07, 48 tokens d'entrée par appel. La branche `responses`
+(gpt-5 & co, pages ramenées dans le contexte facturé, 29 034 tokens par
+appel) a été retirée le 05/08/2026 : code mort, jamais utilisé par la
+configuration.
 """
 
 from __future__ import annotations
@@ -25,7 +17,6 @@ import httpx
 from ..config import ClientConfig, Engine
 from ..models import EngineResponse, Source
 
-RESPONSES_URL = "https://api.openai.com/v1/responses"
 CHAT_URL = "https://api.openai.com/v1/chat/completions"
 TIMEOUT = 300.0
 MAX_RETRIES = 5
@@ -55,16 +46,7 @@ def ask(prompt_text: str, engine: Engine, config: ClientConfig) -> EngineRespons
 
     try:
         system = _system_prompt(config, engine.search)
-        if engine.api == "chat_completions":
-            url, body, parse = CHAT_URL, _corps_chat(engine, system, prompt_text), _parse_chat
-        else:
-            url, body, parse = (
-                RESPONSES_URL,
-                _corps_responses(engine, system, prompt_text),
-                _parse_responses,
-            )
-
-        response = _post_avec_reprise(url, body)
+        response = _post_avec_reprise(CHAT_URL, _corps_chat(engine, system, prompt_text))
         payload = response.json()
         result.raw = payload
 
@@ -73,7 +55,7 @@ def ask(prompt_text: str, engine: Engine, config: ClientConfig) -> EngineRespons
             return result
 
         result.usage = payload.get("usage")
-        result.answer_text, result.sources = parse(payload)
+        result.answer_text, result.sources = _parse_chat(payload)
 
     except Exception as exc:
         result.error = f"{type(exc).__name__}: {exc}"
@@ -93,19 +75,6 @@ def _corps_chat(engine: Engine, system: str, prompt_text: str) -> dict:
     }
     if engine.search:
         body["web_search_options"] = {"search_context_size": "low"}
-    return body
-
-
-def _corps_responses(engine: Engine, system: str, prompt_text: str) -> dict:
-    body = {
-        "model": engine.model,
-        "input": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": prompt_text},
-        ],
-    }
-    if engine.search:
-        body["tools"] = [{"type": "web_search", "search_context_size": "low"}]
     return body
 
 
@@ -165,26 +134,3 @@ def _parse_chat(payload: dict) -> tuple[str, list[Source]]:
         if citation.get("url"):
             pairs.append((citation["url"], citation.get("title")))
     return (message.get("content") or "").strip(), _dedupe(pairs)
-
-
-def _parse_responses(payload: dict) -> tuple[str, list[Source]]:
-    text_parts: list[str] = []
-    pairs: list[tuple[str, str | None]] = []
-
-    for item in payload.get("output") or []:
-        if not isinstance(item, dict):
-            continue
-        for block in item.get("content") or []:
-            if not isinstance(block, dict):
-                continue
-            if block.get("text"):
-                text_parts.append(block["text"])
-            for annotation in block.get("annotations") or []:
-                if isinstance(annotation, dict) and annotation.get("url"):
-                    pairs.append((annotation["url"], annotation.get("title")))
-
-    if not text_parts and payload.get("output_text"):
-        value = payload["output_text"]
-        text_parts = value if isinstance(value, list) else [value]
-
-    return "".join(text_parts).strip(), _dedupe(pairs)

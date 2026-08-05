@@ -1,7 +1,7 @@
 """Le contrat commun à tous les moteurs.
 
 Chaque adaptateur de moteur renvoie un EngineResponse. Tout le reste du tracker
-ne connaît que ce type : ajouter Mistral ou Grok en v2 ne touchera rien d'autre.
+ne connaît que ce type : ajouter un moteur ne touchera rien d'autre.
 """
 
 from __future__ import annotations

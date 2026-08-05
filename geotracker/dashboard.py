@@ -30,7 +30,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from . import db
-from .config import ROOT, clients_disponibles, load_client, load_produit
+from .config import ROOT, load_client, load_produit
 from .report import collecte_comparable, couverture, run_summary, serie_commune, taux_commun
 
 SORTIE = ROOT / "reports" / "dashboard.html"
@@ -165,7 +165,6 @@ def collecte(conn, run_id: int) -> dict:
         key=lambda q: q["taux"], reverse=True,
     )
     requetes = [q for q in toutes if q["statut"] != "observation"]
-    observation = [q for q in toutes if q["statut"] == "observation"]
 
     total = conn.execute(
         f"""SELECT COUNT(*) n FROM sources s JOIN responses r ON r.id=s.response_id
@@ -315,10 +314,10 @@ def collecte(conn, run_id: int) -> dict:
 
     return {
         "run_id": run_id, "client": meta["client"], "client_label": etiquette,
-        "clients": clients_disponibles(), "set_version": set_version, "n_concurrents": n_conc,
+        "set_version": set_version, "n_concurrents": n_conc,
         "date": meta["started_at"][:10], "resume": resume, "moteurs": moteurs,
         "sante": sante, "matrice": matrice,
-        "requetes": requetes, "observation": observation, "voix": voix,
+        "requetes": requetes, "voix": voix,
         "occupants": occupants, "total_citations": total, "domaines_distincts": distincts,
         "dominance": dominance, "dominance_requetes": dominance_requetes,
         "pages": pages, "duel": duel, "rival": rival, "rival_label": rival_label,
@@ -549,7 +548,6 @@ a.btn--mini{text-decoration:none; display:inline-block; margin-top:0}
 .duel__bar.lui .duel__piste i{background:var(--alert)}
 .duel__bar b{font-family:var(--f-mono); font-size:.74rem; font-weight:700; width:40px;
   text-align:right; flex:none}
-.obs{margin-top:22px; border-top:1px solid var(--line); padding-top:18px}
 .chips{display:flex; align-items:center; gap:6px; flex-wrap:wrap}
 .chip{font-size:.78rem; font-weight:600; padding:6px 12px; border-radius:999px;
   background:var(--paper); border:1px solid var(--line); color:var(--ink); font-family:inherit}
@@ -797,7 +795,7 @@ table.d tr:last-child td{border-bottom:none}
     padding-bottom:14px; margin-bottom:18px; border-bottom:2px solid #1D3826}
   .print-head strong{font-size:1.1rem}
   .print-head span{font-size:.8rem; color:#555}
-  .hero,.mission,.card,.eng,.queue__card,.foot{border:1px solid #ccc; break-inside:avoid}
+  .hero,.mission,.card,.eng,.queue__card{border:1px solid #ccc; break-inside:avoid}
   .mission{background:#fff; color:#152A1C}
   .mission p{color:#3d4a40}
   .mission__eyebrow,.mission__impact{color:#3E7D28}
@@ -858,27 +856,6 @@ JS = r"""
   });});
   var ex=document.getElementById('exporter');
   if(ex){ex.addEventListener('click',function(){window.print();});}
-  var per=[].slice.call(document.querySelectorAll('.per'));
-  function filtre(jours){
-    var limite=null;
-    if(jours>0){limite=new Date(); limite.setDate(limite.getDate()-jours);}
-    var visibles=0, total=0;
-    [].slice.call(document.querySelectorAll('[data-date]')).forEach(function(el){
-      var hors=!!(limite&&new Date(el.getAttribute('data-date')+'T12:00:00')<limite);
-      el.hidden=hors;
-      if(el.hasAttribute('data-collecte')){total++; if(!hors){visibles++;}}
-    });
-    var etat=document.getElementById('per-etat');
-    if(etat){
-      etat.textContent=limite
-        ? visibles+' collecte'+(visibles>1?'s':'')+' sur la période'
-        : 'toutes les collectes';
-    }
-  }
-  per.forEach(function(o){o.addEventListener('click',function(){
-    per.forEach(function(x){x.setAttribute('aria-selected',x===o?'true':'false');});
-    filtre(parseInt(o.getAttribute('data-jours'),10));
-  });});
   var rg=document.getElementById('reglages'), pop=document.getElementById('pop-reglages');
   if(rg&&pop){
     rg.addEventListener('click',function(){
@@ -1167,8 +1144,10 @@ def _vue_resultats(d: dict) -> str:
     # La marge du VERDICT se calcule sur l'échantillon effectivement comparé
     # (le périmètre commun), pas sur la collecte entière.
     marge_cmp = _marge(ctx["resume"]) if ctx else marge
+    # Le périmètre comparé s'affiche TOUJOURS (Marion, 05/08) : le lecteur
+    # doit voir sur quoi porte le delta sans ouvrir un fichier.
     note_perim = ""
-    if ctx and ctx["reduit"]:
+    if ctx:
         note_perim = (f" Comparaison avec la collecte #{ctx['prev_id']}, sur leurs "
                       f"{ctx['n_moteurs']} moteurs communs.")
     if d["delta"] is None:
@@ -1312,16 +1291,6 @@ def _vue_resultats(d: dict) -> str:
                 f'<div class="eng__bar"><i style="width:{max(m["taux"], 2):.0f}%"></i></div>'
                 f'<div class="eng__meta">{rang} · {appels}</div>'
                 f'<p>{_e(_lecture_moteur(m, d["moteurs"]))}</p>{tag}</article>')
-
-    if len(d["serie"]) > 1:
-        barres = "".join(
-            f'<i class="{"on" if i >= len(d["serie"]) - 2 else ""}" '
-            f'style="height:{6 + p["taux"] / 100 * 20:.0f}px"></i>'
-            for i, p in enumerate(d["serie"])
-        )
-        spark = f'<div class="foot__spark">{barres}</div>'
-    else:
-        spark = '<span>La courbe apparaîtra à la deuxième collecte.</span>'
 
     titre = ("Une réponse d'IA sur deux cite la marque" if 45 <= taux <= 55
              else f"{taux:.0f} % des réponses d'IA citent la marque")
@@ -1513,7 +1482,12 @@ def _courbe(d: dict, marge: float) -> str:
     etiquette = (f'<text x="{xs[-1]:.1f}" y="{y(dernier["taux"]) - 12:.1f}" text-anchor="end" '
                  f'class="curve__val">{dernier["taux"]:.0f} %</text>')
 
+    # Le périmètre de la courbe s'affiche TOUJOURS dans l'en-tête de la carte
+    # (Marion, 05/08) ; la phrase d'explication, elle, n'apparaît que quand la
+    # courbe mesure moins de moteurs que la collecte courante.
     sctx = d.get("serie_ctx")
+    hint_perim = (f"périmètre constant : {sctx['n_moteurs']} moteurs communs · "
+                  if sctx else "")
     note_serie = ""
     if sctx and sctx["reduit"]:
         note_serie = (f" Courbe à <strong>périmètre constant</strong> : les "
@@ -1522,7 +1496,7 @@ def _courbe(d: dict, marge: float) -> str:
                       f"les collectes affichées l'ont.")
     return f"""<section class="card">
   <div class="card__head"><h2>Courbe de visibilité</h2>
-    <span class="card__hint">bande grisée : marge de fluctuation ±{_nb(marge)} pts</span></div>
+    <span class="card__hint">{hint_perim}bande grisée : marge de fluctuation ±{_nb(marge)} pts</span></div>
   <p class="card__lead">Tant que la ligne reste dans sa bande, la mesure est <strong>stable</strong> :
   l'oscillation est le comportement normal d'une réponse d'IA, pas un recul.
   Le vrai signal, c'est la tendance sur 3-4 collectes.{note_serie}</p>
@@ -1556,25 +1530,6 @@ def _vue_requetes(d: dict) -> str:
         f'<td class="n">{q["cites"]}/{q["ok"]}</td></tr>'
         for q in sorted(d["requetes"], key=lambda x: x["id"])
     )
-    obs_html = ""
-    if d["observation"]:
-        lignes_obs = "".join(
-            f'<tr><td>{_e(q["texte"])}</td><td class="n">{_e(q["id"])}</td>'
-            f'<td class="n">{q["taux"]:.0f} %</td>'
-            f'<td class="n">{q["cites"]}/{q["ok"]}</td></tr>'
-            for q in sorted(d["observation"], key=lambda x: x["id"])
-        )
-        obs_html = f"""
-  <div class="obs">
-    <div class="card__head"><h2>En observation</h2>
-      <span class="card__hint">hors taux global</span></div>
-    <p class="card__lead">Ces requêtes sont collectées et mesurées, mais n'entrent ni dans le
-    taux global ni dans le périmètre de comparaison : on peut les <strong>tester sans faire
-    bouger la série</strong>. Bonnes sur 2-3 collectes, elles sont promues titulaires.</p>
-    <div class="tw"><table class="d">
-    <tr><th>Requête</th><th>Réf.</th><th>Citation</th><th>Ratio</th></tr>
-    {lignes_obs}</table></div>
-  </div>"""
     return f"""<section class="card">
   <div class="card__head"><h2>Jeu de requêtes</h2>
     <span class="card__hint">version {d['set_version']} · {len(d['requetes'])} requêtes ·
@@ -1598,7 +1553,7 @@ def _vue_requetes(d: dict) -> str:
   </div>
   <div class="tw"><table class="d">
   <tr><th>Requête</th><th>Réf.</th><th>Type</th><th>Citation</th><th>Ratio</th></tr>
-  {lignes}</table></div>{obs_html}</section>"""
+  {lignes}</table></div></section>"""
 
 
 def _vue_collectes(d: dict) -> str:
@@ -1621,13 +1576,6 @@ def _vue_collectes(d: dict) -> str:
 
 def rendu(d: dict) -> str:
     p = d["produit"]
-    if len(d["clients"]) > 1:
-        opts = "".join(f'<option{" selected" if c == d["client"] else ""}>{_e(c)}</option>'
-                       for c in d["clients"])
-        client = f'<select class="chip" aria-label="Client">{opts}</select>'
-    else:
-        client = ""
-
     return f"""<div class="app">
   <aside class="side">
     <div class="brand" title="{_e(p['nom'])} · {_e(p['signature'])}">
@@ -1702,14 +1650,6 @@ def rendu(d: dict) -> str:
           Créer un rapport</button>
       </div>
     </header>
-    <div class="toolrow chips" role="group" aria-label="Période">
-      {client}
-      <button class="chip per" data-jours="7" aria-selected="false">7 jours</button>
-      <button class="chip per" data-jours="28" aria-selected="false">28 jours</button>
-      <button class="chip per" data-jours="90" aria-selected="false">3 mois</button>
-      <button class="chip per" data-jours="0" aria-selected="true">Tout</button>
-      <span class="chip chip--etat" id="per-etat">toutes les collectes</span>
-    </div>
     <div id="v-res" role="tabpanel">{_vue_resultats(d)}</div>
     <div id="v-suj" role="tabpanel" hidden>{_vue_sujets(d)}</div>
     <div id="v-req" role="tabpanel" hidden>{_vue_requetes(d)}</div>

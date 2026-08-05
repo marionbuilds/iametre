@@ -96,14 +96,24 @@ def taux_commun(conn, run_id: int, engines, prompts) -> dict:
             "avg_rank": row["avg_rank"]}
 
 
+def plancher_moteurs(n_moins_fournie: int) -> int:
+    """Nombre minimal de moteurs communs pour qu'une comparaison soit honnête :
+    la MAJORITÉ des moteurs de la collecte la moins fournie, et jamais moins
+    de 3. Deux collectes qui ne partageraient que Perplexity donneraient un
+    delta qui ne mesure qu'un moteur en se présentant comme une évolution
+    globale (plancher posé par Marion le 05/08/2026)."""
+    return max(3, n_moins_fournie // 2 + 1)
+
+
 def collecte_comparable(conn, run_id: int, client: str, exclure=()) -> dict | None:
     """La collecte antérieure la plus récente MESURABLE face à `run_id`.
 
     L'UNIQUE règle de comparaison du produit : le dashboard et le rapport
     texte passent tous les deux par ici. Deux collectes sont comparables sur
     leur PÉRIMÈTRE COMMUN : les requêtes communes doivent couvrir toutes les
-    requêtes titulaires de la collecte courante, et au moins un moteur doit
-    être partagé. Le delta se calcule ensuite pour les DEUX collectes
+    requêtes titulaires de la collecte courante, et les moteurs communs
+    doivent atteindre le plancher (majorité de la collecte la moins fournie,
+    minimum 3). Le delta se calcule ensuite pour les DEUX collectes
     restreintes à ce périmètre commun ; comparer 255 appels sur 5 moteurs à
     3 appels sur un seul n'est pas une mesure (bug réel du run #15, 05/08).
     """
@@ -114,9 +124,10 @@ def collecte_comparable(conn, run_id: int, client: str, exclure=()) -> dict | No
         "SELECT id FROM runs WHERE client = ? AND id < ? ORDER BY id DESC", (client, run_id)
     ):
         engines, prompts = couverture(conn, row["id"], exclure)
-        if pr_cur <= prompts and (engines & eng_cur):
-            return {"prev_id": row["id"], "engines": engines & eng_cur,
-                    "prompts": pr_cur, "reduit": (engines & eng_cur) < eng_cur}
+        commun = engines & eng_cur
+        if pr_cur <= prompts and len(commun) >= plancher_moteurs(min(len(engines), len(eng_cur))):
+            return {"prev_id": row["id"], "engines": commun,
+                    "prompts": pr_cur, "reduit": commun < eng_cur}
     return None
 
 
@@ -144,7 +155,8 @@ def serie_commune(conn, client: str, exclure=(), reference: int | None = None) -
         "SELECT id, DATE(started_at) AS j FROM runs WHERE client = ? ORDER BY id", (client,)
     ):
         engines, prompts = couverture(conn, row["id"], exclure)
-        if pr_cur <= prompts and (engines & eng_cur):
+        commun = engines & eng_cur
+        if pr_cur <= prompts and len(commun) >= plancher_moteurs(min(len(engines), len(eng_cur))):
             par_jour[row["j"]] = (row["id"], engines)
     if not par_jour:
         return [], None
@@ -152,7 +164,10 @@ def serie_commune(conn, client: str, exclure=(), reference: int | None = None) -
     eng_serie = set(eng_cur)
     for _, engines in par_jour.values():
         eng_serie &= engines
-    if not eng_serie:
+    # Le plancher vaut aussi pour la courbe entière : une série qui ne
+    # mesurerait qu'un ou deux moteurs communs se présenterait comme LA
+    # courbe de visibilité en n'étant que celle d'un moteur.
+    if len(eng_serie) < 3:
         return [], None
 
     points = []
