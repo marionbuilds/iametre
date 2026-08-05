@@ -81,10 +81,10 @@ def _corps_chat(engine: Engine, system: str, prompt_text: str) -> dict:
 # ---------------------------------------------------------------- reprise 429
 
 def _post_avec_reprise(url: str, body: dict) -> httpx.Response:
-    """Un compte OpenAI neuf est plafonné à 10 000 tokens/minute. Avec l'API
-    `responses` un seul appel en consomme 13 000 à 30 000 : les erreurs 429
-    sont la NORME au début, pas une anomalie. On attend le délai indiqué et on
-    recommence. Le plafond se relève tout seul avec l'ancienneté du compte."""
+    """Un compte OpenAI neuf est plafonné à 10 000 tokens/minute : les
+    erreurs 429 sont la NORME au début, pas une anomalie. On attend le délai
+    indiqué et on recommence. Le plafond se relève tout seul avec
+    l'ancienneté du compte."""
     headers = {
         "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}",
         "Content-Type": "application/json",

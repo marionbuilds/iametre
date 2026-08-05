@@ -27,8 +27,8 @@ def _delta(current: float | None, previous: float | None) -> str:
         return ""
     diff = current - previous
     if abs(diff) < 0.5:
-        return "  (=)"
-    return f"  ({diff:+.0f} pts)"
+        return "="
+    return f"{diff:+.0f} pts"
 
 
 def run_summary(conn, run_id: int, exclure=()) -> dict:
@@ -189,24 +189,25 @@ def report_run(conn, run_id: int, comp: dict | None) -> None:
         return
 
     current = run_summary(conn, run_id)
-    delta_txt = ""
-    if comp:
-        a = taux_commun(conn, run_id, comp["engines"], comp["prompts"])
-        b = taux_commun(conn, comp["prev_id"], comp["engines"], comp["prompts"])
-        delta_txt = _delta(a["rate"], b["rate"])
 
     print(f"\n# Run #{run_id} — {meta['client']} — {meta['started_at']}")
     print(f"Set de requêtes v{meta['set_version']}")
-    if comp:
-        print(f"Comparé au run #{comp['prev_id']}, à périmètre commun : "
-              f"{len(comp['engines'])} moteurs, {len(comp['prompts'])} requêtes")
-    else:
-        print("Aucune collecte antérieure comparable : pas d'évolution affichée.")
 
+    # Le delta vit sur SA ligne, avec SON périmètre (règle du 05/08) : le taux
+    # de citation mesure la collecte entière, l'évolution mesure le périmètre
+    # commun. Les coller sur une même ligne mélangeait deux mesures.
     print("\n## Vue d'ensemble")
     print(f"  Appels réussis        : {current['ok']}/{current['n']}"
           + (f"  ⚠️ {current['errors']} erreurs" if current["errors"] else ""))
-    print(f"  Taux de citation      : {_pct(current['cited'], current['ok'])}" + delta_txt)
+    print(f"  Taux de citation      : {_pct(current['cited'], current['ok'])}")
+    if comp:
+        a = taux_commun(conn, run_id, comp["engines"], comp["prompts"])
+        b = taux_commun(conn, comp["prev_id"], comp["engines"], comp["prompts"])
+        print(f"  Évolution             : {_delta(a['rate'], b['rate']) or 'n/a'}  "
+              f"(périmètre commun avec le run #{comp['prev_id']} : "
+              f"{len(comp['engines'])} moteurs, {len(comp['prompts'])} requêtes)")
+    else:
+        print("  Évolution             : aucune collecte antérieure comparable")
     if current["avg_rank"]:
         print(f"  Rang moyen en source  : {current['avg_rank']:.1f}")
     if current["avg_position"] is not None:

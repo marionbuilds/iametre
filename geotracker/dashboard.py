@@ -304,7 +304,7 @@ def collecte(conn, run_id: int) -> dict:
     ).fetchall():
         s = run_summary(conn, r["id"], exclure=exclure)
         if s["n"]:
-            historique.append(dict(id=r["id"], iso=r["started_at"][:10],
+            historique.append(dict(id=r["id"],
                                    date=r["started_at"][:16].replace("T", " à "),
                                    note=r["note"] or "", n=s["n"], erreurs=s["errors"],
                                    taux=s["rate"]))
@@ -516,7 +516,6 @@ body{font-family:var(--f-body); background:var(--bg); color:var(--ink); line-hei
 .pop__t{font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em;
   color:var(--ink-faint); margin-bottom:8px}
 .pop__row{display:flex; gap:6px}
-.toolrow{margin-bottom:18px}
 .reqform{display:flex; gap:10px; margin:2px 0 16px; flex-wrap:wrap}
 .reqform input{flex:1; min-width:240px; border:1px solid var(--line); border-radius:999px;
   padding:12px 18px; font-family:inherit; font-size:.9rem; background:var(--bg);
@@ -548,14 +547,12 @@ a.btn--mini{text-decoration:none; display:inline-block; margin-top:0}
 .duel__bar.lui .duel__piste i{background:var(--alert)}
 .duel__bar b{font-family:var(--f-mono); font-size:.74rem; font-weight:700; width:40px;
   text-align:right; flex:none}
-.chips{display:flex; align-items:center; gap:6px; flex-wrap:wrap}
 .chip{font-size:.78rem; font-weight:600; padding:6px 12px; border-radius:999px;
   background:var(--paper); border:1px solid var(--line); color:var(--ink); font-family:inherit}
 button.chip{cursor:pointer}
 button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-forest);
   border-color:transparent}
 .chip:focus-visible{outline:3px solid var(--data-deep); outline-offset:2px}
-.chip--etat{color:var(--ink-soft); font-weight:500; border-style:dashed}
 .print-head{display:none}
 
 .hero{background:var(--paper); border:1px solid var(--line); border-radius:22px;
@@ -566,6 +563,10 @@ button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-fore
 .gauge__value{position:absolute; left:0; right:0; top:58%; text-align:center;
   font-family:var(--f-mono); font-weight:700; font-size:2.9rem; letter-spacing:-.04em;
   line-height:1}
+/* Le chiffre porte son périmètre sur lui (règle du 05/08) : la jauge se
+   qualifie, elle ne change pas de valeur. */
+.gauge__perim{font-family:var(--f-body); font-size:.68rem; font-weight:600;
+  color:var(--ink-faint); letter-spacing:.04em; margin-top:4px}
 .gauge__value small{font-size:1.1rem; font-weight:600; color:var(--ink-soft)}
 .eyebrow{font-size:.7rem; font-weight:700; color:var(--ink-faint);
   text-transform:uppercase; letter-spacing:.12em; margin-bottom:10px}
@@ -790,7 +791,7 @@ table.d tr:last-child td{border-bottom:none}
 @media print{
   body{background:#fff}
   .app{display:block; padding:0; max-width:none}
-  .side,.chips,.mhead__acts,.pop,.mission__acts,.btn--mini,button{display:none!important}
+  .side,.mhead__acts,.pop,.mission__acts,.btn--mini,button{display:none!important}
   .print-head{display:flex; align-items:baseline; justify-content:space-between; gap:12px;
     padding-bottom:14px; margin-bottom:18px; border-bottom:2px solid #1D3826}
   .print-head strong{font-size:1.1rem}
@@ -1370,7 +1371,8 @@ def _vue_resultats(d: dict) -> str:
         <path d="M20 110 A85 85 0 0 1 190 110" fill="none" stroke="var(--signal)"
               stroke-width="14" stroke-linecap="round" stroke-dasharray="{L * taux / 100:.1f} {L}"/>
       </svg>
-      <div class="gauge__value">{taux:.0f}<small>%</small></div>
+      <div class="gauge__value">{taux:.0f}<small>%</small>
+        <div class="gauge__perim">{len(d['moteurs'])} moteurs</div></div>
     </div>
     <div class="hero__mid">
       <h2>{titre}{badge}</h2>
@@ -1478,28 +1480,22 @@ def _courbe(d: dict, marge: float) -> str:
         f'<title>{_e(pt["date"])} : {pt["taux"]:.0f} %</title></circle>'
         for i, (x, pt) in enumerate(zip(xs, serie))
     )
+    # Chaque chiffre porte son périmètre SUR LUI (règle du 05/08) : l'étiquette
+    # du dernier point dit sur combien de moteurs il est mesuré. La ligne
+    # courte de l'en-tête suffit, pas de phrase d'explication en plus.
+    sctx = d.get("serie_ctx")
+    n_mot = sctx["n_moteurs"] if sctx else len(d["moteurs"])
     dernier = serie[-1]
     etiquette = (f'<text x="{xs[-1]:.1f}" y="{y(dernier["taux"]) - 12:.1f}" text-anchor="end" '
-                 f'class="curve__val">{dernier["taux"]:.0f} %</text>')
+                 f'class="curve__val">{dernier["taux"]:.0f} % · {n_mot} moteurs</text>')
 
-    # Le périmètre de la courbe s'affiche TOUJOURS dans l'en-tête de la carte
-    # (Marion, 05/08) ; la phrase d'explication, elle, n'apparaît que quand la
-    # courbe mesure moins de moteurs que la collecte courante.
-    sctx = d.get("serie_ctx")
-    hint_perim = (f"périmètre constant : {sctx['n_moteurs']} moteurs communs · "
-                  if sctx else "")
-    note_serie = ""
-    if sctx and sctx["reduit"]:
-        note_serie = (f" Courbe à <strong>périmètre constant</strong> : les "
-                      f"{sctx['n_moteurs']} moteurs communs à toutes les collectes ; "
-                      f"un moteur ajouté en route entre dans la courbe quand toutes "
-                      f"les collectes affichées l'ont.")
     return f"""<section class="card">
   <div class="card__head"><h2>Courbe de visibilité</h2>
-    <span class="card__hint">{hint_perim}bande grisée : marge de fluctuation ±{_nb(marge)} pts</span></div>
+    <span class="card__hint">périmètre constant : {n_mot} moteurs communs ·
+    bande grisée : marge de fluctuation ±{_nb(marge)} pts</span></div>
   <p class="card__lead">Tant que la ligne reste dans sa bande, la mesure est <strong>stable</strong> :
   l'oscillation est le comportement normal d'une réponse d'IA, pas un recul.
-  Le vrai signal, c'est la tendance sur 3-4 collectes.{note_serie}</p>
+  Le vrai signal, c'est la tendance sur 3-4 collectes.</p>
   <svg class="curve" viewBox="0 0 {W} {H}" role="img"
        aria-label="Courbe du taux de citation avec sa marge de fluctuation">
     <line x1="{PAD}" y1="{y(50):.1f}" x2="{W - PAD}" y2="{y(50):.1f}" class="curve__mid"/>
