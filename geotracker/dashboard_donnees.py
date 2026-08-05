@@ -416,6 +416,33 @@ def _prochaine_collecte(date_du_jour) -> str:
             else f"Prochaine collecte dans {jours} jours, lundi.")
 
 
+def _brief(q: dict, d: dict) -> str:
+    """Le bouton copie un VRAI brief de contenu, pas un texte décoratif :
+    la question, l'état mesuré, qui occupe le terrain, l'impact attendu.
+    (Supprimée à tort lors de la fusion de la Passe 1, restaurée sur ordre
+    de Marion : une fusion ne supprime pas de fonctionnalité.)"""
+    occ = d["occupants"].get(q["id"], [])
+    lignes = [
+        f"BRIEF DE CONTENU — {d['client_label']}",
+        "",
+        f"Question à couvrir : {q['texte']}",
+        f"Mesuré le {d['date']} : citée dans {q['cites']} réponse(s) sur {q['ok']} testées "
+        f"({q['taux']:.0f} %).",
+        f"Diagnostic : {_diagnostic(q)}",
+    ]
+    if occ:
+        lignes += ["", "Domaines actuellement cités sur cette question :"] + [f"  - {o}" for o in occ]
+    else:
+        lignes += ["", "Aucun domaine ne s'impose : terrain libre."]
+    lignes += [
+        "",
+        f"Impact estimé si ce sujet atteint le niveau des sujets qui fonctionnent : "
+        f"{_promesse(_impact(q, d['requetes'], d['resume']))} de taux de citation global "
+        f"(borne basse volontaire).",
+    ]
+    return "\n".join(lignes)
+
+
 def _prompt_ia(q: dict, d: dict) -> str:
     """Prompt prêt à coller dans ChatGPT / Claude / Perplexity. Demande de
     Marion (29/07/2026) : « il faut vraiment être dans un outil d'action, de
@@ -527,10 +554,9 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
                  "texte": (f"Collecte complète : les {len(d['moteurs'])} moteurs ont "
                            f"répondu, aucun appel perdu.")}
 
-    # PASSE 1 (Marion, 05/08/2026) : le hero ne porte plus que l'ÉTAT (où j'en
-    # suis). La règle graduée est une promesse d'action : elle vit dans
-    # « À faire ». Les stats de part de voix sont une preuve : elles vivent
-    # à côté de la carte voix.
+    # Passe 1 corrigée (Marion, 05/08/2026) : la règle graduée REVIENT dans le
+    # hero, sans elle il était à moitié vide. Les stats de part de voix, elles,
+    # restent une preuve : elles vivent à côté de la carte voix.
     hero = {
         "taux": taux,
         "n_moteurs": len(d["moteurs"]),
@@ -540,6 +566,9 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
         "phrase": phrase,
         "appels_reussis": r["ok"],
         "sante": sante,
+        "palier": palier,
+        "reste": reste,
+        "contenus": contenus,
     }
     stats = {"place": place, "place_suffixe": "re" if place == 1 else "e",
              "domaines": d["domaines_distincts"],
@@ -571,8 +600,10 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
     # Trois entrées, la n°1 d'abord (la requête sous le seuil de trou qui
     # rapporterait le plus), puis les opportunités suivantes : on ne se limite
     # PAS aux requêtes sous le seuil, il y en a rarement trois, et la question
-    # « qu'est-ce que j'écris ensuite ? » se pose à chaque collecte. Structure
-    # UNIFIÉE pour les trois : question, diagnostic, impact, recette.
+    # « qu'est-ce que j'écris ensuite ? » se pose à chaque collecte.
+    # Structure UNIFIÉE pour les trois ; `contexte` et `brief` sont OPTIONNELS
+    # et portés par la n°1 (l'ex-mission garde ses deux boutons et sa phrase
+    # de terrain : une fusion ne supprime pas de fonctionnalité).
     cible = max(trous, key=lambda q: _impact(q, d["requetes"], r)) if trous else None
     candidats = sorted(
         (q for q in d["requetes"]
@@ -580,16 +611,21 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
         key=lambda q: _impact(q, d["requetes"], r), reverse=True,
     )[:2]
     entrees = ([cible] if cible is not None else []) + candidats
-    a_faire = {
-        # La règle graduée : une promesse d'action, pas un état (ex-hero).
-        "regle": {"taux": taux, "palier": palier, "reste": reste, "contenus": contenus},
-        "items": [
-            {"numero": i, "question": q["texte"], "diagnostic": _diagnostic(q),
-             "impact": _promesse(_impact(q, d["requetes"], r)), "taux": q["taux"],
-             "taux_warn": q["taux"] >= 10, "recette": _prompt_ia(q, d)}
-            for i, q in enumerate(entrees, start=1)
-        ],
-    }
+    items = []
+    for i, q in enumerate(entrees, start=1):
+        est_cible = cible is not None and q["id"] == cible["id"]
+        occ = d["occupants"].get(q["id"], [])
+        items.append({
+            "numero": i, "question": q["texte"], "diagnostic": _diagnostic(q),
+            "contexte": ((f"Le terrain est occupé par {', '.join(occ[:3])}." if occ
+                          else "Aucun domaine ne s'impose : le terrain est libre.")
+                         if est_cible else None),
+            "impact": _promesse(_impact(q, d["requetes"], r)), "taux": q["taux"],
+            "taux_warn": q["taux"] >= 10,
+            "brief": _brief(q, d) if est_cible else None,
+            "recette": _prompt_ia(q, d),
+        })
+    a_faire = {"items": items}
 
     lignes_voix = []
     for i, v in enumerate(d["voix"], 1):

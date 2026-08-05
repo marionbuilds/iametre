@@ -72,7 +72,7 @@ body{font-family:var(--f-body); background:var(--bg); color:var(--ink); line-hei
 .app{display:flex; align-items:flex-start; gap:20px; max-width:1420px; margin:0 auto;
   padding:16px}
 
-.side{flex:none; width:138px; position:sticky; top:16px; height:calc(100vh - 32px);
+.side{flex:none; width:188px; position:sticky; top:16px; height:calc(100vh - 32px);
   min-height:480px; background:var(--forest); color:var(--sur-forest); border-radius:26px;
   padding:16px 10px 18px; display:flex; flex-direction:column; align-items:center; gap:8px}
 .brand{margin-bottom:16px}
@@ -80,11 +80,11 @@ body{font-family:var(--f-body); background:var(--bg); color:var(--ink); line-hei
   display:grid; place-items:center}
 /* Passe 1 : le libellé de vue est VISIBLE à côté de l'icône (avant, les noms
    de vues n'existaient qu'en title/aria-label, donc invisibles). */
-.nav{display:flex; align-items:center; gap:9px; width:100%; height:44px; border:none;
+.nav{display:flex; align-items:center; gap:9px; width:100%; min-height:44px; border:none;
   background:none; color:var(--sur-forest-soft); border-radius:15px; cursor:pointer;
-  padding:0 13px; font-family:inherit}
+  padding:9px 13px; font-family:inherit; text-align:left}
 .nav svg{flex:none}
-.nav span{font-size:.8rem; font-weight:700; letter-spacing:.02em}
+.nav span{font-size:.78rem; font-weight:700; letter-spacing:.02em; line-height:1.25}
 .nav[aria-selected="true"]{background:var(--forest-2); color:var(--sur-forest)}
 @media(hover:hover){.nav:hover{color:var(--sur-forest)}}
 .nav:focus-visible{outline:3px solid var(--lime); outline-offset:2px}
@@ -198,9 +198,12 @@ button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-fore
 .stat--crown .stat__num{color:var(--data-deep)}
 /* Passe 1 : les stats descendues du hero, posées à côté du classement voix. */
 .lb-stats{display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin:0 0 18px}
-/* Passe 1 : la règle graduée et la mission vivent DANS la carte « À faire ». */
-.card > .ruler{margin:4px 0 22px}
+/* Passe 1 : la mission vit DANS la carte « À faire ». */
 .card .mission{margin:0 0 14px}
+/* Une grille à un seul occupant : la carte prend toute la largeur.
+   (Sélecteur composé : .grid est définie plus bas dans la feuille et
+   gagnerait sinon la cascade.) */
+.grid.grid--pleine{grid-template-columns:1fr}
 
 .mission{border-radius:22px; background:var(--forest); color:var(--sur-forest);
   padding:26px 30px; margin-bottom:18px; display:grid; grid-template-columns:1fr auto;
@@ -544,10 +547,10 @@ JS = r"""
 # --------------------------------------------------- les blocs, un par carte
 
 def _hero(h: dict) -> str:
-    """Passe 1 : le hero ne dit plus que l'ÉTAT. La règle graduée est partie
-    dans « À faire » (une promesse d'action), les stats à côté de voix (une
-    preuve). La jauge garde son palier : c'est un repère de lecture."""
-    taux = h["taux"]
+    """Le hero : l'état ET la règle graduée (revenue en Passe 1 corrigée,
+    sans elle le hero était à moitié vide). Les stats de part de voix, elles,
+    vivent à côté de la carte voix."""
+    taux, palier, reste = h["taux"], h["palier"], h["reste"]
     L = 267
     badge = ""
     if h["badge"] is not None:
@@ -560,11 +563,16 @@ def _hero(h: dict) -> str:
     s = h["sante"]
     classe = {"ok": " health--ok", "partielle": "", "muette": " health--bad"}[s["variante"]]
     sante_html = f'<p class="health{classe}">{s["texte"]}</p>'
+    reste_txt = f"<strong>+{reste:.0f} pts restants</strong>"
+    if h["contenus"]:
+        reste_txt += f" · <strong>{h['contenus']} à {h['contenus'] + 1} contenus</strong>"
     return f"""  <section class="hero">
     <div class="gauge">
       <svg viewBox="0 0 210 130" aria-hidden="true">
         <path d="M20 110 A85 85 0 0 1 190 110" fill="none" stroke="var(--piste)"
               stroke-width="14" stroke-linecap="round"/>
+        <path d="M20 110 A85 85 0 0 1 190 110" fill="none" stroke="var(--ink-faint)"
+              stroke-width="14" stroke-linecap="round" stroke-dasharray="{L * palier / 100:.1f} {L}"/>
         <path d="M20 110 A85 85 0 0 1 190 110" fill="none" stroke="var(--signal)"
               stroke-width="14" stroke-linecap="round" stroke-dasharray="{L * taux / 100:.1f} {L}"/>
       </svg>
@@ -576,6 +584,16 @@ def _hero(h: dict) -> str:
       <p class="eyebrow">Visibilité IA</p>
       <p>Mesuré sur <strong>{h["appels_reussis"]} appels réussis</strong>, {h["n_moteurs"]} moteurs. {_e(h["phrase"])}</p>
       {sante_html}
+      <div class="ruler">
+        <div class="ruler__track">
+          <span class="ruler__ticks"></span>
+          <span class="ruler__fill" style="width:{taux:.0f}%"></span>
+          <span class="ruler__goal" style="left:{palier}%"><span>Palier {palier} %</span></span>
+        </div>
+        <div class="ruler__caption">
+          <span><strong>{taux:.0f} %</strong> aujourd'hui</span><span>{reste_txt}</span>
+        </div>
+      </div>
     </div>
   </section>"""
 
@@ -604,31 +622,31 @@ def _moteurs(moteurs: list) -> str:
 
 
 def _a_faire(af: dict) -> str:
-    """Passe 1 : la section unique « À faire ». En tête, la règle graduée
-    (ex-hero : c'est une promesse d'action, pas un état). Puis trois entrées
-    classées par impact décroissant, structure unifiée : la première mise en
-    avant comme l'ancienne mission, les suivantes en retrait."""
-    r = af["regle"]
-    taux, palier = r["taux"], r["palier"]
-    reste_txt = f"<strong>+{r['reste']:.0f} pts restants</strong>"
-    if r["contenus"]:
-        reste_txt += f" · <strong>{r['contenus']} à {r['contenus'] + 1} contenus</strong>"
-
+    """La section unique « À faire » (fusion Passe 1) : trois entrées classées
+    par impact décroissant, structure unifiée, la première mise en avant comme
+    l'ancienne mission. `contexte` et `brief` sont optionnels : quand ils sont
+    là (l'entrée n°1), la phrase de terrain et le bouton « Copier le brief »
+    s'affichent — une fusion ne supprime pas de fonctionnalité."""
     tete = ""
     if af["items"]:
         q = af["items"][0]
+        contexte = f" {_e(q['contexte'])}" if q["contexte"] else ""
+        brief = ""
+        if q["brief"]:
+            brief = (f'<button class="btn--ghost" data-copy="{_e(q["brief"])}" '
+                     f'data-ok="Brief copié">Copier le brief</button>\n        ')
         tete = f"""
   <section class="mission">
     <div>
       <div class="mission__eyebrow">Ta prochaine action · opportunité n°1</div>
       <h2>{_cite(q['question'])}</h2>
-      <p>{_e(q['diagnostic'])}
+      <p>{_e(q['diagnostic'])}{contexte}
       <strong>C'est le sujet où un contenu rapporterait le plus.</strong></p>
     </div>
     <div class="mission__side">
       <div class="mission__impact">{_e(q['impact'])}<small>impact estimé, borne basse</small></div>
       <div class="mission__acts">
-        <button class="btn btn--primary" data-copy="{_e(q['recette'])}" data-ok="Recette copiée, colle-la dans une IA">Copier la recette d'article</button>
+        {brief}<button class="btn btn--primary" data-copy="{_e(q['recette'])}" data-ok="Recette copiée, colle-la dans une IA">Copier la recette d'article</button>
       </div>
     </div>
   </section>"""
@@ -650,16 +668,6 @@ def _a_faire(af: dict) -> str:
   <section class="card">
     <div class="card__head"><h2>À faire</h2>
       <span class="card__hint">classées par impact sur le taux global</span></div>
-    <div class="ruler">
-      <div class="ruler__track">
-        <span class="ruler__ticks"></span>
-        <span class="ruler__fill" style="width:{taux:.0f}%"></span>
-        <span class="ruler__goal" style="left:{palier}%"><span>Palier {palier} %</span></span>
-      </div>
-      <div class="ruler__caption">
-        <span><strong>{taux:.0f} %</strong> aujourd'hui</span><span>{reste_txt}</span>
-      </div>
-    </div>
 {tete}
     {queue}
   </section>"""
@@ -923,22 +931,18 @@ def _alignement(al: dict) -> str:
 
 # ------------------------------------------------------- les vues (panneaux)
 
-def _vue_produit(d: dict) -> str:
-    """La vue produit (Passe 1). Quatre niveaux, dans l'ordre strict :
-    où j'en suis (hero, courbe) → à faire (règle, mission, articles) →
-    où pousser (duel) → la preuve (matrice, voix + stats, alignement,
-    forteresses, dominance). Un bloc qui ne répond ni au chiffre, ni à
-    l'action, ni à la preuve n'est pas dans cette vue."""
+def _vue_ensemble(d: dict) -> str:
+    """Vue 1 (Passe 1 corrigée) : hero avec sa règle graduée, les cartes
+    moteurs, « À faire », le duel, la part de voix avec ses stats, puis
+    forteresses et dominance, et la courbe en toute dernière position."""
     return f"""
 {_hero(d["hero"])}
-{_courbe(d["courbe"])}
+  <div class="engines">{_moteurs(d["moteurs"])}</div>
 {_a_faire(d["a_faire"])}
 {_duel(d["duel"])}
-{_matrice(d["matrice"])}
 
-  <div class="grid">
+  <div class="grid grid--pleine">
 {_voix(d["voix"])}
-{_alignement(d["alignement"])}
   </div>
 
   <div class="grid">
@@ -946,17 +950,20 @@ def _vue_produit(d: dict) -> str:
 {_dominance(d["dominance"])}
   </div>
 
-  <div class="engines">{_moteurs(d["moteurs"])}</div>"""
+{_courbe(d["courbe"])}"""
 
 
-def _vue_machine(d: dict) -> str:
-    """La vue machine (Passe 1) : ce qui fait tourner l'instrument, pas ce
-    qu'il mesure. Collectes et jeu de requêtes."""
-    return f"""{_vue_collectes(d["collectes"])}
-{_requetes_machine(d["jeu_requetes"])}"""
+def _vue_moteurs_sujets(d: dict) -> str:
+    """Vue 2 : la matrice requête × moteur."""
+    return _matrice(d["matrice"])
 
 
-def _requetes_machine(j: dict) -> str:
+def _vue_citations(d: dict) -> str:
+    """Vue 3 : l'alignement question → page, en version détaillée."""
+    return _alignement(d["alignement"])
+
+
+def _vue_requetes(j: dict) -> str:
     """La carte du jeu de requêtes, SANS le tableau : il a fusionné dans la
     matrice, qui porte la même information en plus riche. Le formulaire de
     proposition reste inchangé (il sera traité dans une passe suivante)."""
@@ -1014,19 +1021,42 @@ def rendu(d: dict) -> str:
                 stroke="#EFF6E8" stroke-width="1.8" stroke-linecap="round"/></svg>
       </div>
     </div>
-    <button class="nav" role="tab" aria-selected="true" aria-controls="v-prod"
-            title="Produit" aria-label="Produit">
+    <button class="nav" role="tab" aria-selected="true" aria-controls="v-ens"
+            title="Vue d'ensemble" aria-label="Vue d'ensemble">
       <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
         <rect x="2" y="2" width="5.2" height="5.2" rx="1.6" stroke="currentColor" stroke-width="1.6"/>
         <rect x="8.8" y="2" width="5.2" height="5.2" rx="1.6" stroke="currentColor" stroke-width="1.6"/>
         <rect x="2" y="8.8" width="5.2" height="5.2" rx="1.6" stroke="currentColor" stroke-width="1.6"/>
-        <rect x="8.8" y="8.8" width="5.2" height="5.2" rx="1.6" stroke="currentColor" stroke-width="1.6"/></svg><span>Produit</span></button>
-    <button class="nav" role="tab" aria-selected="false" aria-controls="v-mach"
-            title="Machine" aria-label="Machine">
+        <rect x="8.8" y="8.8" width="5.2" height="5.2" rx="1.6" stroke="currentColor" stroke-width="1.6"/></svg><span>Vue d'ensemble</span></button>
+    <button class="nav" role="tab" aria-selected="false" aria-controls="v-mot"
+            title="Moteurs et sujets" aria-label="Moteurs et sujets">
+      <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <rect x="2" y="2" width="12" height="12" rx="2.4" stroke="currentColor" stroke-width="1.6"/>
+        <path d="M2 6.4 H14 M6.4 6.4 V14" stroke="currentColor" stroke-width="1.4"/>
+        <rect x="8.4" y="8.4" width="3.6" height="3.2" rx="1" fill="currentColor"/></svg><span>Moteurs et sujets</span></button>
+    <button class="nav" role="tab" aria-selected="false" aria-controls="v-cit"
+            title="Ce que les IA citent chez toi" aria-label="Ce que les IA citent chez toi">
+      <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M6.6 9.4 L9.4 6.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        <path d="M7.8 4.6 L9.2 3.2 a2.6 2.6 0 0 1 3.6 3.6 L11.4 8.2" stroke="currentColor"
+              stroke-width="1.6" stroke-linecap="round" fill="none"/>
+        <path d="M8.2 11.4 L6.8 12.8 a2.6 2.6 0 0 1 -3.6 -3.6 L4.6 7.8" stroke="currentColor"
+              stroke-width="1.6" stroke-linecap="round" fill="none"/></svg><span>Ce que les IA citent chez toi</span></button>
+    <button class="nav" role="tab" aria-selected="false" aria-controls="v-req"
+            title="Requêtes" aria-label="Requêtes">
+      <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <rect x="2" y="2" width="12" height="12" rx="3" stroke="currentColor" stroke-width="1.6"/>
+        <circle cx="5.6" cy="5.6" r="1.05" fill="currentColor"/>
+        <circle cx="10.4" cy="5.6" r="1.05" fill="currentColor"/>
+        <circle cx="8" cy="8" r="1.05" fill="currentColor"/>
+        <circle cx="5.6" cy="10.4" r="1.05" fill="currentColor"/>
+        <circle cx="10.4" cy="10.4" r="1.05" fill="currentColor"/></svg><span>Requêtes</span></button>
+    <button class="nav" role="tab" aria-selected="false" aria-controls="v-col"
+            title="Collectes" aria-label="Collectes">
       <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
         <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.7"/>
         <path d="M8 4.5 L8 8 L10.6 9.6" stroke="currentColor" stroke-width="1.7"
-              stroke-linecap="round"/></svg><span>Machine</span></button>
+              stroke-linecap="round"/></svg><span>Collectes</span></button>
     <div class="side__sep"></div>
     <div class="side__client" title="{_e(m['client_label'])}">{_e(m['client_initiale'])}</div>
   </aside>
@@ -1064,8 +1094,11 @@ def rendu(d: dict) -> str:
           Créer un rapport</button>
       </div>
     </header>
-    <div id="v-prod" role="tabpanel">{_vue_produit(d)}</div>
-    <div id="v-mach" role="tabpanel" hidden>{_vue_machine(d)}</div>
+    <div id="v-ens" role="tabpanel">{_vue_ensemble(d)}</div>
+    <div id="v-mot" role="tabpanel" hidden>{_vue_moteurs_sujets(d)}</div>
+    <div id="v-cit" role="tabpanel" hidden>{_vue_citations(d)}</div>
+    <div id="v-req" role="tabpanel" hidden>{_vue_requetes(d["jeu_requetes"])}</div>
+    <div id="v-col" role="tabpanel" hidden>{_vue_collectes(d["collectes"])}</div>
   </main>
 </div>
 <style>{CSS}</style>

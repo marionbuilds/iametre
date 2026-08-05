@@ -8,11 +8,15 @@
 > ni à SQLite, ni aux YAML, ni au système de fichiers.
 > Règle absolue de la refactorisation initiale : HTML identique **au caractère près**
 > à `reports/reference-avant-refactor.html` — vérifié le 05/08/2026, `cmp` muet.
-> **PASSE 1 (05/08/2026, après validation)** : restructuration délibérée de l'interface.
-> Le HTML change, la référence ne pilote plus rien (gardée comme trace). Deux vues
-> (Produit / Machine), hero réduit à l'état, section « À faire » unifiée, stats près
-> de voix, `pages_resume` supprimé, tableau du jeu de requêtes fusionné dans la matrice.
-> Les tables du §3 reflètent l'état APRÈS Passe 1.
+> **PASSE 1 (05/08/2026, corrigée le jour même)** : restructuration délibérée de
+> l'interface. Le HTML change, la référence ne pilote plus rien (gardée comme trace).
+> **5 vues à libellés visibles** : Vue d'ensemble (hero avec règle graduée, moteurs,
+> À faire, duel, voix + stats, forteresses + dominance, courbe en dernier) ·
+> Moteurs et sujets (matrice) · Ce que les IA citent chez toi (alignement) ·
+> Requêtes (compteurs + formulaire) · Collectes. Acquis : `pages_resume` supprimé,
+> mission + articles fusionnés en « À faire » (contexte et brief OPTIONNELS, portés
+> par l'entrée n°1 : une fusion ne supprime pas de fonctionnalité), tableau des
+> requêtes fusionné dans la matrice. Les tables du §3 reflètent cet état.
 
 ---
 
@@ -74,10 +78,12 @@ Conséquence : `donnees()` est une fonction pure de `(base, run_id, date_du_jour
 | `phrase` | str | l.1154-1169 — phrase d'état assemblée (exception §2.2), note de périmètre incluse |
 | `appels_reussis` | int | `resume["ok"]` (« Mesuré sur 253 appels réussis ») |
 | `sante` | dict | l.1174-1191. `{variante: "ok"\|"partielle"\|"muette", texte: str}` — phrase assemblée (exception §2.2). Render : variante → `health--ok` / (rien) / `health--bad` |
+| `palier` | int | `_objectif(taux)` — arc secondaire de la jauge et « Palier 60 % » |
+| `reste` | float | `_objectif(taux)` — « +7 pts restants » |
+| `contenus` | int\|null | « 2 à 3 contenus » (render affiche `contenus` à `contenus+1`) ; null = absent |
 
-Passe 1 : le hero ne porte plus que l'ÉTAT. `palier`/`reste`/`contenus` sont partis
-dans `a_faire.regle` (une promesse d'action), `stats` dans `voix.stats` (une preuve).
-La jauge n'affiche plus l'arc de palier : sa donnée a suivi la règle graduée.
+Passe 1 corrigée : la règle graduée est REVENUE dans le hero (sans elle il était à
+moitié vide). Seules les `stats` restent parties, dans `voix.stats` (une preuve).
 
 ### 3.3 `moteurs` — les cartes moteurs (liste, déjà triée par taux décroissant)
 
@@ -91,23 +97,25 @@ La jauge n'affiche plus l'arc de palier : sa donnée a suivi la règle graduée.
 | `lecture` | str | `_lecture_moteur()` (l.381-404) — phrase assemblée (exception §2.2) |
 | `tag` | str\|null | `"allie"` \| `"objectif"` \| null (l.1295-1299) — render → « Ton allié » / « Objectif long terme » |
 
-### 3.4 `a_faire` — la section unique « À faire » (Passe 1 : fusion mission + articles)
+### 3.4 `a_faire` — la section unique « À faire » (fusion mission + articles)
 
 | Champ | Type | Provenance actuelle |
 |---|---|---|
-| `regle` | dict | `{taux: float, palier: int, reste: float, contenus: int\|null}` — la règle graduée, ex-hero (`_objectif`, calcul des contenus) |
 | `items` | list | 0 à 3 entrées, classées par impact décroissant : la requête sous `SEUIL_TROU` qui rapporterait le plus (ex-mission), puis les opportunités < 60 % hors n°1 (ex-articles), triées par `_impact()` |
 | `items[].numero` | int | 1, 2, 3 |
 | `items[].question` | str | texte brut (guillemets côté render) |
 | `items[].diagnostic` | str | `_diagnostic(q)` (exception §2.2) |
+| `items[].contexte` | str\|null | **OPTIONNEL**, porté par l'entrée n°1 : « Le terrain est occupé par… » / « …terrain est libre. » (exception §2.2) |
 | `items[].impact` | str | `_promesse(_impact(q, …))` (exception §2.2) |
 | `items[].taux` | float | taux de la requête |
 | `items[].taux_warn` | bool | `taux >= 10` |
+| `items[].brief` | str\|null | **OPTIONNEL**, porté par l'entrée n°1 : payload du bouton « Copier le brief » (`_brief()`, exception §2.2) |
 | `items[].recette` | str | `_prompt_ia(q, d)` (exception §2.2) |
 
-Structure UNIFIÉE pour les trois entrées. Conséquences de l'unification : le champ
-`brief` (et son bouton « Copier le brief ») et le champ `contexte` de l'ex-mission
-ont disparu — `_brief()` a été supprimée de la couche données.
+Structure unifiée ; l'entrée n°1 porte deux boutons (brief + recette) et la phrase
+de contexte, les n°2 et n°3 un seul bouton. Règle gravée après la correction de la
+Passe 1 : **une fusion ne supprime pas de fonctionnalité** — en cas de collision
+entre une structure et une fonctionnalité existante, on s'arrête et on demande.
 
 ### 3.6 `voix` — « Qui te prend des citations »
 
@@ -230,7 +238,7 @@ Déterminisme (amendement n°2) : `donnees()` étant une fonction pure de `(base
 3. **Échappement HTML** : couche render, au moment de l'insertion.
 4. **Horloge** : jamais lue par la couche data ; `date_du_jour` est un paramètre (amendement n°2, §2 bis).
 5. **Noms de fichiers** : `dashboard_donnees.py` / `dashboard_rendu.py`, `dashboard.py` point d'entrée. (Validés tels quels.)
-6. **Une fonction render par bloc** (état après Passe 1) : `_hero`, `_moteurs`, `_a_faire`, `_voix`, `_forteresses`, `_dominance`, `_duel`, `_courbe`, `_matrice`, `_alignement`, `_requetes_machine`, `_vue_collectes`, plus les composeurs `_vue_produit` et `_vue_machine` et la coquille `rendu()` (rail à 2 boutons, libellés visibles). Chacune reçoit sa portion du dictionnaire et rien d'autre ; chacune est appelable avec un dictionnaire écrit à la main, sans base présente.
+6. **Une fonction render par bloc** (état après Passe 1 corrigée) : `_hero`, `_moteurs`, `_a_faire`, `_voix`, `_forteresses`, `_dominance`, `_duel`, `_courbe`, `_matrice`, `_alignement`, `_vue_requetes`, `_vue_collectes`, plus les composeurs `_vue_ensemble`, `_vue_moteurs_sujets`, `_vue_citations` et la coquille `rendu()` (rail à 5 boutons, libellés visibles). Chacune reçoit sa portion du dictionnaire et rien d'autre ; chacune est appelable avec un dictionnaire écrit à la main, sans base présente.
 
 ## 7. Méthode de vérification
 
