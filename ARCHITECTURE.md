@@ -15,8 +15,9 @@
 
 | Fichier | Rôle | Contenu |
 |---|---|---|
+| `geotracker/format.py` | **Module neutre** | `nb()` (nombres à la française) et toute fonction de formatage typographique partagée. **N'importe rien du projet.** La data et le render l'importent tous les deux ; aucun import direct entre data et render, dans aucun sens |
 | `geotracker/dashboard_donnees.py` | **Couche 1 — data** | `donnees(conn, run_id, date_du_jour) -> dict`. Seule couche qui ouvre SQLite et lit les YAML. Reprend : `collecte()`, `_exclusion`, `_impact`, `_marge`, `_promesse`, `_objectif`, `_lecture_moteur`, `_diagnostic`, `_prochaine_collecte`, `_brief`, `_prompt_ia`, `SEUIL_TROU`, `NOMS_MOTEURS`, `NOMS_COURTS` |
-| `geotracker/dashboard_rendu.py` | **Couche 2 — render** | `rendu(d: dict) -> str` et une fonction par bloc visuel. Reprend : `CSS`, `JS`, `_e` (échappement), `_cite` (guillemets français), `_nb` (nombres à la française). Aucun import de `db`, `config` ou `report` |
+| `geotracker/dashboard_rendu.py` | **Couche 2 — render** | `rendu(d: dict) -> str` et une fonction par bloc visuel. Reprend : `CSS`, `JS`, `_e` (échappement), `_cite` (guillemets français). Aucun import de `db`, `config`, `report` ni `dashboard_donnees` |
 | `geotracker/dashboard.py` | **CLI, inchangé d'usage** | `python -m geotracker.dashboard` garde exactement les mêmes options. Orchestration : ouvre la base → `donnees()` → `rendu()` → écrit le fichier. Plus l'option d'export JSON (§5) |
 
 Les tests (`tests_smoke.py`, test 6) continuent d'importer `JS` — depuis `dashboard_rendu`.
@@ -24,7 +25,7 @@ Les tests (`tests_smoke.py`, test 6) continuent d'importer `JS` — depuis `dash
 ## 2. La frontière entre les deux couches, en 6 règles
 
 1. **La data porte le sens, le render porte la forme** (amendement n°1). Tout champ numérique du dictionnaire est un nombre brut (`int` ou `float`), jamais une chaîne formatée. Le render applique la typographie française (`_nb`, virgule décimale) à l'affichage, au même titre que les guillemets. **Un même nombre n'existe jamais à deux endroits du dictionnaire sous deux représentations.**
-2. **Exception unique et volontaire** : les phrases d'interprétation assemblées (`phrase` du badge, `sante.texte`, `lecture` d'un moteur, `diagnostic`, `contexte`, `impact`, `brief`, `recette`) restent en couche data avec leurs valeurs intégrées, parce qu'elles portent une décision de sens, pas seulement un chiffre. Pour composer ces phrases, la couche data importe `_nb` depuis `dashboard_rendu` — c'est le seul import dans ce sens, et il ne transporte que de la typographie.
+2. **Exception unique et volontaire** : les phrases d'interprétation assemblées (`phrase` du badge, `sante.texte`, `lecture` d'un moteur, `diagnostic`, `contexte`, `impact`, `brief`, `recette`) restent en couche data avec leurs valeurs intégrées, parce qu'elles portent une décision de sens, pas seulement un chiffre. Pour composer ces phrases, la couche data importe `nb` depuis le module neutre `format.py` (§1) — **jamais depuis le render**. Aucun import direct entre data et render, dans aucun sens : le render est remplaçable sans toucher à la data.
 3. **Toute condition d'affichage est résolue en booléen ou en variante nommée** dans la couche data (`affiche`, `variante: "stable"`). La couche render ne fait que tester ces booléens et brancher sur ces variantes ; elle ne compare jamais deux valeurs métier.
 4. **Les seuils sont appliqués côté data, les classes CSS choisies côté render.** La data dit `niveau: "high"` ; le render traduit `high -> mx--high`.
 5. **L'échappement HTML (`_e`) reste dans la couche render**, au moment de l'insertion. Le dictionnaire contient du texte brut : c'est ce qui le rend lisible en JSON.
@@ -64,7 +65,7 @@ Conséquence : `donnees()` est une fonction pure de `(base, run_id, date_du_jour
 | `taux` | float | `resume["rate"] or 0` (`_vue_resultats` l.1131) — jauge (géométrie) ET `{taux:.0f}` (render) |
 | `n_moteurs` | int | `len(d["moteurs"])` — « 5 moteurs » sous la jauge et « , 5 moteurs. » dans la phrase de mesure |
 | `titre` | str | règle 45-55 (l.1341) : « Une réponse d'IA sur deux… » sinon assemblée avec le taux (exception §2.2) |
-| `badge` | dict\|null | l.1154-1169. `{variante: "stable"\|"hausse"\|"baisse", delta: float}` — delta en valeur absolue, brut. Render : variante → `delta--flat/up/down`, libellé « ≈ stable » ou « ▲/▼ {_nb(delta)} pts ». `null` si aucune comparaison |
+| `badge` | dict\|null | l.1154-1169. `{variante: "stable"\|"hausse"\|"baisse", delta: float}` — delta **signé**, brut (le CLI affiche « +5.2 pts », le render affiche la valeur absolue). Render : variante → `delta--flat/up/down`, libellé « ≈ stable » ou « ▲/▼ {nb(abs(delta))} pts ». `null` si aucune comparaison |
 | `phrase` | str | l.1154-1169 — phrase d'état assemblée (exception §2.2), note de périmètre incluse |
 | `appels_reussis` | int | `resume["ok"]` (« Mesuré sur 253 appels réussis ») |
 | `sante` | dict | l.1174-1191. `{variante: "ok"\|"partielle"\|"muette", texte: str}` — phrase assemblée (exception §2.2). Render : variante → `health--ok` / (rien) / `health--bad` |
@@ -229,7 +230,7 @@ Déterminisme (amendement n°2) : `donnees()` étant une fonction pure de `(base
 
 ## 6. Points d'implémentation actés
 
-1. **Nombres** : bruts dans le dictionnaire, format français côté render, aucune double forme ; les phrases assemblées sont la seule exception (amendement n°1, §2.1-2.2).
+1. **Nombres** : bruts dans le dictionnaire, format français côté render, aucune double forme ; les phrases assemblées sont la seule exception (amendement n°1, §2.1-2.2). `nb()` vit dans le module neutre `format.py`, importé par les deux couches, qui n'importe rien du projet.
 2. **Guillemets français** (`_cite`) : typographie, donc couche render. Le dictionnaire contient les questions sans « ». (Validé tel quel.)
 3. **Échappement HTML** : couche render, au moment de l'insertion.
 4. **Horloge** : jamais lue par la couche data ; `date_du_jour` est un paramètre (amendement n°2, §2 bis).

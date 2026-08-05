@@ -56,7 +56,7 @@ print("OK  erreur moteur non bloquante, brut conserve")
 # la chaine n'etait plus fermee et TOUT le script mourait au chargement.
 # L'interface restait belle et rien ne cliquait. Ce test rend la panne bruyante.
 import shutil, subprocess, tempfile, pathlib
-from geotracker.dashboard import JS
+from geotracker.dashboard_rendu import JS
 
 if shutil.which("node"):
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
