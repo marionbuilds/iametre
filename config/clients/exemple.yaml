@@ -1,0 +1,87 @@
+# Jeu de suivi GEO : configuration d'EXEMPLE, entièrement fictive.
+#
+# C'est le gabarit à copier pour suivre un site : un fichier par site dans
+# config/clients/, et le tracker se lance avec `--client <nom-du-fichier>`.
+# Les tests de fumée tournent sur ce fichier : il fait donc aussi office de
+# contrat de structure.
+#
+# ⚠️ Ce fichier définit une SÉRIE TEMPORELLE. Ajouter une requête est sans
+# danger. En modifier ou en retirer une casse la comparabilité historique :
+# ne le fais pas sans passer par un nouveau `set_version`.
+
+client: exemple
+label: "Maison Dupont"
+set_version: 1
+locale: fr-FR
+country: France
+
+# Ce qui compte comme « je suis cité »
+target:
+  domains:
+    - maison-dupont.fr
+  brand_terms:
+    - "Maison Dupont"
+    - "maison-dupont"
+
+# Qui prend la place quand ce n'est pas moi (part de voix)
+competitors:
+  - domain: atelier-martin.fr
+    label: "Atelier Martin"
+  - domain: fournil-durand.fr
+    label: "Fournil Durand"
+
+# Le rival du duel : LE concurrent direct à battre.
+rival: atelier-martin.fr
+
+# Les requêtes : des questions posées comme un humain les pose, pas des
+# mots-clés. Statut optionnel `observation` : collectée et mesurée, mais
+# exclue des agrégats le temps de la valider.
+prompts:
+  - id: q01
+    text: "Quel est le meilleur artisan pour une table en chêne sur mesure ?"
+    type: comparative
+  - id: q02
+    text: "Comment choisir un menuisier pour rénover un escalier ancien ?"
+    type: decisionnelle
+  - id: q03
+    text: "Quel budget prévoir pour une bibliothèque sur mesure ?"
+    type: informationnelle
+
+# Échantillonnage. Une réponse de LLM est non déterministe : on ne constate
+# pas, on échantillonne.
+sampling:
+  repetitions: 5
+  repetitions_ai_overview: 3   # une SERP varie beaucoup moins qu'un LLM
+
+# Les moteurs suivis.
+# search: true  = vraie mesure GEO (le modèle va chercher sur le web)
+# search: false = « mémoire de marque » (le modèle répond de ses poids)
+engines:
+  - id: anthropic
+    model: claude-haiku-4-5
+    search: true
+    search_tool: web_search_20250305
+    repetitions: 2
+    enabled: true
+
+  - id: anthropic-memory
+    provider: anthropic
+    model: claude-haiku-4-5
+    search: false
+    repetitions: 2
+    enabled: true
+
+  - id: openai
+    model: gpt-4o-mini-search-preview
+    search: true
+    enabled: true
+
+  - id: perplexity
+    model: sonar
+    search: true
+    enabled: true
+
+  - id: ai_overview
+    provider: dataforseo
+    search: true
+    enabled: true
