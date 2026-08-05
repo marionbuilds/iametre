@@ -6,8 +6,13 @@
 > Objectif : deux couches nettes. `donnees` construit un dictionnaire JSON-sérialisable
 > décrivant tout ce que la page affiche ; `rendu` le transforme en HTML sans toucher
 > ni à SQLite, ni aux YAML, ni au système de fichiers.
-> Règle absolue : le HTML généré après refactorisation est identique **au caractère près**
-> à `reports/reference-avant-refactor.html`.
+> Règle absolue de la refactorisation initiale : HTML identique **au caractère près**
+> à `reports/reference-avant-refactor.html` — vérifié le 05/08/2026, `cmp` muet.
+> **PASSE 1 (05/08/2026, après validation)** : restructuration délibérée de l'interface.
+> Le HTML change, la référence ne pilote plus rien (gardée comme trace). Deux vues
+> (Produit / Machine), hero réduit à l'état, section « À faire » unifiée, stats près
+> de voix, `pages_resume` supprimé, tableau du jeu de requêtes fusionné dans la matrice.
+> Les tables du §3 reflètent l'état APRÈS Passe 1.
 
 ---
 
@@ -69,10 +74,10 @@ Conséquence : `donnees()` est une fonction pure de `(base, run_id, date_du_jour
 | `phrase` | str | l.1154-1169 — phrase d'état assemblée (exception §2.2), note de périmètre incluse |
 | `appels_reussis` | int | `resume["ok"]` (« Mesuré sur 253 appels réussis ») |
 | `sante` | dict | l.1174-1191. `{variante: "ok"\|"partielle"\|"muette", texte: str}` — phrase assemblée (exception §2.2). Render : variante → `health--ok` / (rien) / `health--bad` |
-| `palier` | int | `_objectif(taux)` — arc secondaire de la jauge et « Palier 60 % » |
-| `reste` | int | `_objectif(taux)` — « +7 pts restants » |
-| `contenus` | int\|null | l.1139-1141 — « 2 à 3 contenus » (render affiche `contenus` à `contenus+1`) ; null = absent |
-| `stats` | dict | l.1420-1427. `{place: int\|null, place_suffixe: "re"\|"e", domaines: int, part: float\|null, rang: float\|null}` — render formate (`_nb`, « % ») et affiche « — » / « n/d » sur les null |
+
+Passe 1 : le hero ne porte plus que l'ÉTAT. `palier`/`reste`/`contenus` sont partis
+dans `a_faire.regle` (une promesse d'action), `stats` dans `voix.stats` (une preuve).
+La jauge n'affiche plus l'arc de palier : sa donnée a suivi la règle graduée.
 
 ### 3.3 `moteurs` — les cartes moteurs (liste, déjà triée par taux décroissant)
 
@@ -86,31 +91,23 @@ Conséquence : `donnees()` est une fonction pure de `(base, run_id, date_du_jour
 | `lecture` | str | `_lecture_moteur()` (l.381-404) — phrase assemblée (exception §2.2) |
 | `tag` | str\|null | `"allie"` \| `"objectif"` \| null (l.1295-1299) — render → « Ton allié » / « Objectif long terme » |
 
-### 3.4 `mission` — l'opportunité n°1
+### 3.4 `a_faire` — la section unique « À faire » (Passe 1 : fusion mission + articles)
 
 | Champ | Type | Provenance actuelle |
 |---|---|---|
-| `affiche` | bool | `bool(trous)` : au moins une requête < `SEUIL_TROU` (25 %) (l.1197-1198) |
-| `question` | str | requête maximisant `_impact()` parmi les trous — texte brut, guillemets posés par le render (`_cite`) |
-| `diagnostic` | str | `_diagnostic(cible)` (l.406-413) — phrase assemblée (exception §2.2) |
-| `contexte` | str | l.1201-1202 : « Le terrain est occupé par X, Y, Z. » ou « …terrain est libre. » (exception §2.2) |
-| `impact` | str | `_promesse(_impact(...))` — « au moins +4 pts » (exception §2.2 : la borne basse est une décision de sens) |
-| `brief` | str | `_brief()` (l.940-962) — payload du bouton « Copier le brief » (exception §2.2) |
-| `recette` | str | `_prompt_ia()` (l.965-1004) — payload du bouton « Copier la recette d'article » (exception §2.2) |
-
-### 3.5 `articles` — « Les articles à créer »
-
-| Champ | Type | Provenance actuelle |
-|---|---|---|
-| `affiche` | bool | au moins un candidat (l.1224-1240) |
-| `items` | list | 2 max, triés par `_impact()` décroissant parmi les requêtes < 60 % hors mission |
-| `items[].numero` | int | 2 puis 3 (l.1238) |
+| `regle` | dict | `{taux: float, palier: int, reste: float, contenus: int\|null}` — la règle graduée, ex-hero (`_objectif`, calcul des contenus) |
+| `items` | list | 0 à 3 entrées, classées par impact décroissant : la requête sous `SEUIL_TROU` qui rapporterait le plus (ex-mission), puis les opportunités < 60 % hors n°1 (ex-articles), triées par `_impact()` |
+| `items[].numero` | int | 1, 2, 3 |
 | `items[].question` | str | texte brut (guillemets côté render) |
 | `items[].diagnostic` | str | `_diagnostic(q)` (exception §2.2) |
 | `items[].impact` | str | `_promesse(_impact(q, …))` (exception §2.2) |
-| `items[].taux` | float | taux de la requête — `{taux:.0f} %` côté render |
-| `items[].taux_warn` | bool | `taux >= 10` (classe `queue__rate--warn`) |
+| `items[].taux` | float | taux de la requête |
+| `items[].taux_warn` | bool | `taux >= 10` |
 | `items[].recette` | str | `_prompt_ia(q, d)` (exception §2.2) |
+
+Structure UNIFIÉE pour les trois entrées. Conséquences de l'unification : le champ
+`brief` (et son bouton « Copier le brief ») et le champ `contexte` de l'ex-mission
+ont disparu — `_brief()` a été supprimée de la couche données.
 
 ### 3.6 `voix` — « Qui te prend des citations »
 
@@ -118,6 +115,7 @@ Conséquence : `donnees()` est une fonction pure de `(base, run_id, date_du_jour
 |---|---|---|
 | `total_citations` | int | requête `sources` (`collecte()` l.170-175) |
 | `domaines_distincts` | int | idem (l.176-180) |
+| `stats` | dict | Passe 1, descendu du hero : `{place: int\|null, place_suffixe: "re"\|"e", domaines: int, part: float\|null, rang: float\|null}` — render formate et affiche « — » / « n/d » sur les null |
 | `lead` | dict | l.1344-1349. `{variante: "domine"\|"neutre", poursuivant: str\|null, ecart: float\|null}` — nombres bruts ; le render assemble les deux variantes de phrase avec `<strong>` et `_nb` |
 | `lignes` | list | 8 max, triées par citations (l.1355-1367) |
 | `lignes[].rang` | int | index d'affichage |
@@ -144,13 +142,10 @@ Conséquence : `donnees()` est une fonction pure de `(base, run_id, date_du_jour
 | `items` | list | `dominance_requetes[:5]` (`collecte()` l.216-231) : `[{texte: str, part: float}]` |
 | `vide` | bool | aucune citation (affiche « Aucune citation sur cette collecte. ») |
 
-### 3.9 `pages_resume` — « Ce que les IA citent chez toi » (vue d'ensemble)
+### 3.9 `pages_resume` — SUPPRIMÉ (Passe 1)
 
-| Champ | Type | Provenance actuelle |
-|---|---|---|
-| `vide` | bool | aucune page citée (l.1379-1385) |
-| `lead` | dict\|null | `{page: str, n: int, total: int}` — phrase assemblée par le render |
-| `lignes` | list | `pages[:6]` (`collecte()` l.233-259) : `[{page: str, n: int, requetes: int}]` |
+C'était une version tronquée d'`alignement`, qui seul subsiste (niveau « preuve »
+de la vue produit).
 
 ### 3.10 `duel`
 
@@ -194,16 +189,16 @@ Conséquence : `donnees()` est une fonction pure de `(base, run_id, date_du_jour
 | `pages[].reste` | int | requêtes au-delà des 5 affichées (0 = pas de ligne « + N autre(s) ») |
 | `pages[].flag` | dict\|null | `{variante: "accueil"\|"absorbe", n: int}` — seuils : accueil ≥ 3 requêtes, page ≥ 8 requêtes (l.1097-1104) |
 
-### 3.14 `jeu_requetes` — vue « Requêtes »
+### 3.14 `jeu_requetes` — vue « Machine »
 
 | Champ | Type | Provenance actuelle |
 |---|---|---|
-| `set_version` | int | `cfg.set_version` |
-| `n_requetes` | int | `len(requetes)` |
-| `n_concurrents` | int | `len(cfg.competitors)` |
-| `lignes` | list | triées par id : `[{texte, id, type, taux: float, cites: int, ok: int}]` |
+| `set_version` / `n_requetes` / `n_concurrents` | int | config |
 
-Le formulaire de proposition et le lien GitHub sont du gabarit **statique** (couche render), inchangés au caractère près, y compris l'URL du dépôt dans le JS.
+Passe 1 : le tableau des requêtes (`lignes`) a fusionné dans la matrice, qui porte
+la même information en plus riche. Ne restent que les compteurs, pour la carte du
+formulaire de proposition (vue Machine). Le formulaire et le lien GitHub restent du
+gabarit statique du render, inchangés (traités dans une passe suivante).
 
 ### 3.15 `collectes` — vue « Collectes »
 
@@ -235,7 +230,7 @@ Déterminisme (amendement n°2) : `donnees()` étant une fonction pure de `(base
 3. **Échappement HTML** : couche render, au moment de l'insertion.
 4. **Horloge** : jamais lue par la couche data ; `date_du_jour` est un paramètre (amendement n°2, §2 bis).
 5. **Noms de fichiers** : `dashboard_donnees.py` / `dashboard_rendu.py`, `dashboard.py` point d'entrée. (Validés tels quels.)
-6. **Une fonction render par bloc** : `_hero`, `_moteurs`, `_mission`, `_articles`, `_voix`, `_forteresses`, `_dominance`, `_pages_resume`, `_duel`, `_courbe`, `_matrice`, `_alignement`, `_vue_requetes`, `_vue_collectes`, `_coquille` (rail + en-tête + panneaux). Chacune reçoit sa portion du dictionnaire (`d["hero"]`, `d["duel"]`…) et rien d'autre ; chacune est appelable avec un dictionnaire écrit à la main, sans base présente.
+6. **Une fonction render par bloc** (état après Passe 1) : `_hero`, `_moteurs`, `_a_faire`, `_voix`, `_forteresses`, `_dominance`, `_duel`, `_courbe`, `_matrice`, `_alignement`, `_requetes_machine`, `_vue_collectes`, plus les composeurs `_vue_produit` et `_vue_machine` et la coquille `rendu()` (rail à 2 boutons, libellés visibles). Chacune reçoit sa portion du dictionnaire et rien d'autre ; chacune est appelable avec un dictionnaire écrit à la main, sans base présente.
 
 ## 7. Méthode de vérification
 

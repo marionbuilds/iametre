@@ -416,31 +416,6 @@ def _prochaine_collecte(date_du_jour) -> str:
             else f"Prochaine collecte dans {jours} jours, lundi.")
 
 
-def _brief(q: dict, d: dict) -> str:
-    """Le bouton copie un VRAI brief de contenu, pas un texte décoratif :
-    la question, l'état mesuré, qui occupe le terrain, l'impact attendu."""
-    occ = d["occupants"].get(q["id"], [])
-    lignes = [
-        f"BRIEF DE CONTENU — {d['client_label']}",
-        "",
-        f"Question à couvrir : {q['texte']}",
-        f"Mesuré le {d['date']} : citée dans {q['cites']} réponse(s) sur {q['ok']} testées "
-        f"({q['taux']:.0f} %).",
-        f"Diagnostic : {_diagnostic(q)}",
-    ]
-    if occ:
-        lignes += ["", "Domaines actuellement cités sur cette question :"] + [f"  - {o}" for o in occ]
-    else:
-        lignes += ["", "Aucun domaine ne s'impose : terrain libre."]
-    lignes += [
-        "",
-        f"Impact estimé si ce sujet atteint le niveau des sujets qui fonctionnent : "
-        f"{_promesse(_impact(q, d['requetes'], d['resume']))} de taux de citation global "
-        f"(borne basse volontaire).",
-    ]
-    return "\n".join(lignes)
-
-
 def _prompt_ia(q: dict, d: dict) -> str:
     """Prompt prêt à coller dans ChatGPT / Claude / Perplexity. Demande de
     Marion (29/07/2026) : « il faut vraiment être dans un outil d'action, de
@@ -552,6 +527,10 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
                  "texte": (f"Collecte complète : les {len(d['moteurs'])} moteurs ont "
                            f"répondu, aucun appel perdu.")}
 
+    # PASSE 1 (Marion, 05/08/2026) : le hero ne porte plus que l'ÉTAT (où j'en
+    # suis). La règle graduée est une promesse d'action : elle vit dans
+    # « À faire ». Les stats de part de voix sont une preuve : elles vivent
+    # à côté de la carte voix.
     hero = {
         "taux": taux,
         "n_moteurs": len(d["moteurs"]),
@@ -561,14 +540,11 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
         "phrase": phrase,
         "appels_reussis": r["ok"],
         "sante": sante,
-        "palier": palier,
-        "reste": reste,
-        "contenus": contenus,
-        "stats": {"place": place, "place_suffixe": "re" if place == 1 else "e",
-                  "domaines": d["domaines_distincts"],
-                  "part": moi["part"] if moi else None,
-                  "rang": r["avg_rank"]},
     }
+    stats = {"place": place, "place_suffixe": "re" if place == 1 else "e",
+             "domaines": d["domaines_distincts"],
+             "part": moi["part"] if moi else None,
+             "rang": r["avg_rank"]}
 
     sante_par_moteur = {s["id"]: s for s in d["sante"]}
     meilleur = max((x["taux"] for x in d["moteurs"]), default=0)
@@ -591,39 +567,27 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
             "tag": tag,
         })
 
+    # « À FAIRE », section unique (fusion mission + articles, Passe 1).
+    # Trois entrées, la n°1 d'abord (la requête sous le seuil de trou qui
+    # rapporterait le plus), puis les opportunités suivantes : on ne se limite
+    # PAS aux requêtes sous le seuil, il y en a rarement trois, et la question
+    # « qu'est-ce que j'écris ensuite ? » se pose à chaque collecte. Structure
+    # UNIFIÉE pour les trois : question, diagnostic, impact, recette.
     cible = max(trous, key=lambda q: _impact(q, d["requetes"], r)) if trous else None
-    if cible is not None:
-        occ = d["occupants"].get(cible["id"], [])
-        mission = {
-            "affiche": True,
-            "question": cible["texte"],
-            "diagnostic": _diagnostic(cible),
-            "contexte": (f"Le terrain est occupé par {', '.join(occ[:3])}." if occ
-                         else "Aucun domaine ne s'impose : le terrain est libre."),
-            "impact": _promesse(_impact(cible, d["requetes"], r)),
-            "brief": _brief(cible, d),
-            "recette": _prompt_ia(cible, d),
-        }
-    else:
-        mission = {"affiche": False, "question": None, "diagnostic": None,
-                   "contexte": None, "impact": None, "brief": None, "recette": None}
-
-    # Les opportunités n°2 et n°3. On ne se limite PAS aux requêtes sous le
-    # seuil de trou : il y en a rarement trois, et la question « qu'est-ce que
-    # j'écris ensuite ? » se pose à chaque collecte. On classe par impact tout
-    # ce qui n'est pas déjà une forteresse.
     candidats = sorted(
         (q for q in d["requetes"]
          if q["taux"] < 60 and (cible is None or q["id"] != cible["id"])),
         key=lambda q: _impact(q, d["requetes"], r), reverse=True,
     )[:2]
-    articles = {
-        "affiche": bool(candidats),
+    entrees = ([cible] if cible is not None else []) + candidats
+    a_faire = {
+        # La règle graduée : une promesse d'action, pas un état (ex-hero).
+        "regle": {"taux": taux, "palier": palier, "reste": reste, "contenus": contenus},
         "items": [
             {"numero": i, "question": q["texte"], "diagnostic": _diagnostic(q),
              "impact": _promesse(_impact(q, d["requetes"], r)), "taux": q["taux"],
              "taux_warn": q["taux"] >= 10, "recette": _prompt_ia(q, d)}
-            for i, q in enumerate(candidats, start=2)
+            for i, q in enumerate(entrees, start=1)
         ],
     }
 
@@ -639,6 +603,9 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
     voix = {
         "total_citations": d["total_citations"],
         "domaines_distincts": d["domaines_distincts"],
+        # Les stats descendues du hero (Passe 1) : c'est de la preuve, elles
+        # vivent à côté du classement qu'elles résument.
+        "stats": stats,
         "lead": ({"variante": "domine", "poursuivant": poursuivant["domaine"],
                   "ecart": moi["part"] - poursuivant["part"]}
                  if moi and poursuivant and place == 1
@@ -662,15 +629,11 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
         "vide": not d["dominance_requetes"],
     }
 
+    # pages_resume a disparu en Passe 1 : c'était une version tronquée
+    # d'alignement, qui seul subsiste (niveau « preuve » de la vue produit).
     pages_total = sum(p["n"] for p in d["pages"])
     lead_pages = ({"page": d["pages"][0]["page"], "n": d["pages"][0]["n"],
                    "total": pages_total} if d["pages"] else None)
-    pages_resume = {
-        "vide": not d["pages"],
-        "lead": lead_pages,
-        "lignes": [{"page": p["page"], "n": p["n"], "requetes": p["requetes"]}
-                   for p in d["pages"]],
-    }
 
     menees = sum(1 for x in d["duel"] if x["moi"] > x["lui"])
     perdues = sum(1 for x in d["duel"] if x["lui"] > x["moi"])
@@ -743,13 +706,13 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
         })
     alignement = {"vide": not d["pages"], "lead": lead_pages, "pages": pages_align}
 
+    # Le tableau des requêtes a fusionné dans la matrice (Passe 1), qui porte
+    # la même information en plus riche. Ne restent que les compteurs du jeu,
+    # pour la carte du formulaire de proposition (vue Machine).
     jeu_requetes = {
         "set_version": d["set_version"],
         "n_requetes": len(d["requetes"]),
         "n_concurrents": d["n_concurrents"],
-        "lignes": [{"texte": q["texte"], "id": q["id"], "type": q["type"],
-                    "taux": q["taux"], "cites": q["cites"], "ok": q["ok"]}
-                   for q in sorted(d["requetes"], key=lambda x: x["id"])],
     }
 
     collectes = {
@@ -771,8 +734,8 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
         "prochaine_collecte": _prochaine_collecte(date_du_jour),
     }
 
-    return {"meta": meta, "hero": hero, "moteurs": moteurs, "mission": mission,
-            "articles": articles, "voix": voix, "forteresses": forteresses,
-            "dominance": dominance, "pages_resume": pages_resume, "duel": duel,
-            "courbe": courbe, "matrice": matrice, "alignement": alignement,
-            "jeu_requetes": jeu_requetes, "collectes": collectes}
+    return {"meta": meta, "hero": hero, "moteurs": moteurs, "a_faire": a_faire,
+            "voix": voix, "forteresses": forteresses, "dominance": dominance,
+            "duel": duel, "courbe": courbe, "matrice": matrice,
+            "alignement": alignement, "jeu_requetes": jeu_requetes,
+            "collectes": collectes}

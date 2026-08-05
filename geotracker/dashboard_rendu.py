@@ -72,14 +72,19 @@ body{font-family:var(--f-body); background:var(--bg); color:var(--ink); line-hei
 .app{display:flex; align-items:flex-start; gap:20px; max-width:1420px; margin:0 auto;
   padding:16px}
 
-.side{flex:none; width:76px; position:sticky; top:16px; height:calc(100vh - 32px);
+.side{flex:none; width:138px; position:sticky; top:16px; height:calc(100vh - 32px);
   min-height:480px; background:var(--forest); color:var(--sur-forest); border-radius:26px;
-  padding:16px 0 18px; display:flex; flex-direction:column; align-items:center; gap:8px}
+  padding:16px 10px 18px; display:flex; flex-direction:column; align-items:center; gap:8px}
 .brand{margin-bottom:16px}
 .brand__mark{width:44px; height:44px; border-radius:14px; background:rgba(239,246,232,.14);
   display:grid; place-items:center}
-.nav{display:grid; place-items:center; width:46px; height:46px; border:none; background:none;
-  color:var(--sur-forest-soft); border-radius:15px; cursor:pointer}
+/* Passe 1 : le libellé de vue est VISIBLE à côté de l'icône (avant, les noms
+   de vues n'existaient qu'en title/aria-label, donc invisibles). */
+.nav{display:flex; align-items:center; gap:9px; width:100%; height:44px; border:none;
+  background:none; color:var(--sur-forest-soft); border-radius:15px; cursor:pointer;
+  padding:0 13px; font-family:inherit}
+.nav svg{flex:none}
+.nav span{font-size:.8rem; font-weight:700; letter-spacing:.02em}
 .nav[aria-selected="true"]{background:var(--forest-2); color:var(--sur-forest)}
 @media(hover:hover){.nav:hover{color:var(--sur-forest)}}
 .nav:focus-visible{outline:3px solid var(--lime); outline-offset:2px}
@@ -191,6 +196,11 @@ button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-fore
 .stat__num{font-family:var(--f-mono); font-weight:700; font-size:1.35rem; letter-spacing:-.02em}
 .stat__lbl{font-size:.76rem; color:var(--ink-soft)}
 .stat--crown .stat__num{color:var(--data-deep)}
+/* Passe 1 : les stats descendues du hero, posées à côté du classement voix. */
+.lb-stats{display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin:0 0 18px}
+/* Passe 1 : la règle graduée et la mission vivent DANS la carte « À faire ». */
+.card > .ruler{margin:4px 0 22px}
+.card .mission{margin:0 0 14px}
 
 .mission{border-radius:22px; background:var(--forest); color:var(--sur-forest);
   padding:26px 30px; margin-bottom:18px; display:grid; grid-template-columns:1fr auto;
@@ -534,7 +544,10 @@ JS = r"""
 # --------------------------------------------------- les blocs, un par carte
 
 def _hero(h: dict) -> str:
-    taux, palier, reste = h["taux"], h["palier"], h["reste"]
+    """Passe 1 : le hero ne dit plus que l'ÉTAT. La règle graduée est partie
+    dans « À faire » (une promesse d'action), les stats à côté de voix (une
+    preuve). La jauge garde son palier : c'est un repère de lecture."""
+    taux = h["taux"]
     L = 267
     badge = ""
     if h["badge"] is not None:
@@ -547,17 +560,11 @@ def _hero(h: dict) -> str:
     s = h["sante"]
     classe = {"ok": " health--ok", "partielle": "", "muette": " health--bad"}[s["variante"]]
     sante_html = f'<p class="health{classe}">{s["texte"]}</p>'
-    reste_txt = f"<strong>+{reste:.0f} pts restants</strong>"
-    if h["contenus"]:
-        reste_txt += f" · <strong>{h['contenus']} à {h['contenus'] + 1} contenus</strong>"
-    st = h["stats"]
     return f"""  <section class="hero">
     <div class="gauge">
       <svg viewBox="0 0 210 130" aria-hidden="true">
         <path d="M20 110 A85 85 0 0 1 190 110" fill="none" stroke="var(--piste)"
               stroke-width="14" stroke-linecap="round"/>
-        <path d="M20 110 A85 85 0 0 1 190 110" fill="none" stroke="var(--ink-faint)"
-              stroke-width="14" stroke-linecap="round" stroke-dasharray="{L * palier / 100:.1f} {L}"/>
         <path d="M20 110 A85 85 0 0 1 190 110" fill="none" stroke="var(--signal)"
               stroke-width="14" stroke-linecap="round" stroke-dasharray="{L * taux / 100:.1f} {L}"/>
       </svg>
@@ -569,24 +576,6 @@ def _hero(h: dict) -> str:
       <p class="eyebrow">Visibilité IA</p>
       <p>Mesuré sur <strong>{h["appels_reussis"]} appels réussis</strong>, {h["n_moteurs"]} moteurs. {_e(h["phrase"])}</p>
       {sante_html}
-      <div class="ruler">
-        <div class="ruler__track">
-          <span class="ruler__ticks"></span>
-          <span class="ruler__fill" style="width:{taux:.0f}%"></span>
-          <span class="ruler__goal" style="left:{palier}%"><span>Palier {palier} %</span></span>
-        </div>
-        <div class="ruler__caption">
-          <span><strong>{taux:.0f} %</strong> aujourd'hui</span><span>{reste_txt}</span>
-        </div>
-      </div>
-    </div>
-    <div class="hero__side">
-      <div class="stat stat--crown"><div class="stat__num">{st["place"] or "—"}<sup>{st["place_suffixe"]}</sup></div>
-        <div class="stat__lbl">sur {st["domaines"]} domaines cités</div></div>
-      <div class="stat"><div class="stat__num">{_nb(st["part"]) + " %" if st["part"] is not None else "n/d"}</div>
-        <div class="stat__lbl">part de voix</div></div>
-      <div class="stat"><div class="stat__num">{_nb(st["rang"]) if st["rang"] else "n/d"}</div>
-        <div class="stat__lbl">rang moyen dans les sources</div></div>
     </div>
   </section>"""
 
@@ -614,31 +603,37 @@ def _moteurs(moteurs: list) -> str:
     return eng
 
 
-def _mission(m: dict) -> str:
-    if not m["affiche"]:
-        return ""
-    return f"""
+def _a_faire(af: dict) -> str:
+    """Passe 1 : la section unique « À faire ». En tête, la règle graduée
+    (ex-hero : c'est une promesse d'action, pas un état). Puis trois entrées
+    classées par impact décroissant, structure unifiée : la première mise en
+    avant comme l'ancienne mission, les suivantes en retrait."""
+    r = af["regle"]
+    taux, palier = r["taux"], r["palier"]
+    reste_txt = f"<strong>+{r['reste']:.0f} pts restants</strong>"
+    if r["contenus"]:
+        reste_txt += f" · <strong>{r['contenus']} à {r['contenus'] + 1} contenus</strong>"
+
+    tete = ""
+    if af["items"]:
+        q = af["items"][0]
+        tete = f"""
   <section class="mission">
     <div>
       <div class="mission__eyebrow">Ta prochaine action · opportunité n°1</div>
-      <h2>{_cite(m['question'])}</h2>
-      <p>{_e(m['diagnostic'])} {_e(m['contexte'])}
+      <h2>{_cite(q['question'])}</h2>
+      <p>{_e(q['diagnostic'])}
       <strong>C'est le sujet où un contenu rapporterait le plus.</strong></p>
     </div>
     <div class="mission__side">
-      <div class="mission__impact">{_e(m['impact'])}<small>impact estimé, borne basse</small></div>
+      <div class="mission__impact">{_e(q['impact'])}<small>impact estimé, borne basse</small></div>
       <div class="mission__acts">
-        <button class="btn--ghost" data-copy="{_e(m['brief'])}" data-ok="Brief copié">Copier le brief</button>
-        <button class="btn btn--primary" data-copy="{_e(m['recette'])}" data-ok="Recette copiée, colle-la dans une IA">Copier la recette d'article</button>
+        <button class="btn btn--primary" data-copy="{_e(q['recette'])}" data-ok="Recette copiée, colle-la dans une IA">Copier la recette d'article</button>
       </div>
     </div>
   </section>"""
 
-
-def _articles(a: dict) -> str:
-    if not a["affiche"]:
-        return ""
-    cartes = "".join(
+    suite = "".join(
         f'<article class="queue__card"><div class="queue__txt">'
         f'<span class="queue__rank">Article n°{q["numero"]}</span>'
         f'<h3>{_cite(q["question"])}</h3><p>{_e(q["diagnostic"])} '
@@ -647,16 +642,26 @@ def _articles(a: dict) -> str:
         f'data-ok="Recette copiée">Copier la recette d\'article</button></div>'
         f'<div class="queue__rate{" queue__rate--warn" if q["taux_warn"] else ""}">'
         f'{q["taux"]:.0f} %</div></article>'
-        for q in a["items"]
+        for q in af["items"][1:]
     )
+    queue = f'<div class="queue">{suite}</div>' if suite else ""
+
     return f"""
   <section class="card">
-    <div class="card__head"><h2>Les articles à créer</h2>
-      <span class="card__hint">après la mission n°1 ci-dessus</span></div>
-    <p class="card__lead">Ces sujets sont ceux où <strong>un contenu neuf te ferait
-    apparaître dans les réponses d'IA</strong>. Ils sont classés par ce qu'ils rapporteraient
-    au taux global, pas par volume de recherche : c'est la logique du GEO.</p>
-    <div class="queue">{cartes}</div>
+    <div class="card__head"><h2>À faire</h2>
+      <span class="card__hint">classées par impact sur le taux global</span></div>
+    <div class="ruler">
+      <div class="ruler__track">
+        <span class="ruler__ticks"></span>
+        <span class="ruler__fill" style="width:{taux:.0f}%"></span>
+        <span class="ruler__goal" style="left:{palier}%"><span>Palier {palier} %</span></span>
+      </div>
+      <div class="ruler__caption">
+        <span><strong>{taux:.0f} %</strong> aujourd'hui</span><span>{reste_txt}</span>
+      </div>
+    </div>
+{tete}
+    {queue}
   </section>"""
 
 
@@ -667,6 +672,17 @@ def _voix(v: dict) -> str:
         f"qu'à {_nb(lead['ecart'])} pts</strong>."
         if lead["variante"] == "domine"
         else "Répartition des citations relevées pendant la collecte."
+    )
+    st = v["stats"]
+    stats = (
+        f'<div class="lb-stats">'
+        f'<div class="stat stat--crown"><div class="stat__num">{st["place"] or "—"}<sup>{st["place_suffixe"]}</sup></div>'
+        f'<div class="stat__lbl">sur {st["domaines"]} domaines cités</div></div>'
+        f'<div class="stat"><div class="stat__num">{_nb(st["part"]) + " %" if st["part"] is not None else "n/d"}</div>'
+        f'<div class="stat__lbl">part de voix</div></div>'
+        f'<div class="stat"><div class="stat__num">{_nb(st["rang"]) if st["rang"] else "n/d"}</div>'
+        f'<div class="stat__lbl">rang moyen dans les sources</div></div>'
+        f'</div>'
     )
     tete = v["lignes"][0]["part"] if v["lignes"] else 1
     lb = ""
@@ -685,6 +701,7 @@ def _voix(v: dict) -> str:
       <div class="card__head"><h2>Qui te prend des citations</h2>
         <span class="card__hint">{v['total_citations']} citations<br>{v['domaines_distincts']} domaines</span></div>
       <p class="card__lead">{lead_voix}</p>
+      {stats}
       <ol class="lb">{lb}</ol>
     </section>"""
 
@@ -723,29 +740,6 @@ def _dominance(dom: dict) -> str:
       de la réponse dans {dom["part_texte"]:.0f} % des appels. C'est la prochaine frontière une fois
       la citation acquise.</p>
       <ul class="st">{items}</ul>
-    </section>"""
-
-
-def _pages_resume(p: dict) -> str:
-    lead = (
-        "Aucune page du site citée sur cette collecte." if p["vide"] else
-        f"<strong>{_e(p['lead']['page'])}</strong> concentre {p['lead']['n']} des "
-        f"{p['lead']['total']} citations de tes pages : les IA te citent surtout par cette porte. "
-        f"La page citée dit <strong>pourquoi</strong> on te cite : ton offre, ou un contenu "
-        f"périphérique."
-    )
-    lignes = "".join(
-        f'<tr><td class="fort">{_e(x["page"])}</td><td class="n">{x["n"]}</td>'
-        f'<td class="n">{x["requetes"]}</td></tr>'
-        for x in p["lignes"]
-    )
-    return f"""    <section class="card">
-      <div class="card__head"><h2>Ce que les IA citent chez toi</h2>
-        <span class="card__hint">alignement au sujet</span></div>
-      <p class="card__lead">{lead}</p>
-      <div class="tw"><table class="d">
-        <tr><th>Page</th><th>Citations</th><th>Requêtes</th></tr>
-        {lignes}</table></div>
     </section>"""
 
 
@@ -929,44 +923,43 @@ def _alignement(al: dict) -> str:
 
 # ------------------------------------------------------- les vues (panneaux)
 
-def _vue_resultats(d: dict) -> str:
+def _vue_produit(d: dict) -> str:
+    """La vue produit (Passe 1). Quatre niveaux, dans l'ordre strict :
+    où j'en suis (hero, courbe) → à faire (règle, mission, articles) →
+    où pousser (duel) → la preuve (matrice, voix + stats, alignement,
+    forteresses, dominance). Un bloc qui ne répond ni au chiffre, ni à
+    l'action, ni à la preuve n'est pas dans cette vue."""
     return f"""
 {_hero(d["hero"])}
-  <div class="engines">{_moteurs(d["moteurs"])}</div>
-{_mission(d["mission"])}
-{_articles(d["articles"])}
+{_courbe(d["courbe"])}
+{_a_faire(d["a_faire"])}
+{_duel(d["duel"])}
+{_matrice(d["matrice"])}
 
   <div class="grid">
 {_voix(d["voix"])}
-{_forteresses(d["forteresses"])}
+{_alignement(d["alignement"])}
   </div>
 
   <div class="grid">
+{_forteresses(d["forteresses"])}
 {_dominance(d["dominance"])}
-{_pages_resume(d["pages_resume"])}
   </div>
-{_duel(d["duel"])}
 
-{_courbe(d["courbe"])}"""
-
-
-def _vue_sujets(d: dict) -> str:
-    """La vue d'analyse : le détail que la vue d'ensemble ne doit pas porter.
-
-    Règle de l'interface (Marion, 05/08/2026) : la première vue est un
-    tableau de bord, on y comprend sa situation en quelques secondes. Tout
-    ce qui demande à être lu ligne par ligne vit ici.
-    """
-    return f"{_matrice(d['matrice'])}\n{_alignement(d['alignement'])}"
+  <div class="engines">{_moteurs(d["moteurs"])}</div>"""
 
 
-def _vue_requetes(j: dict) -> str:
-    lignes = "".join(
-        f'<tr><td>{_e(q["texte"])}</td><td class="n">{_e(q["id"])}</td>'
-        f'<td class="n">{_e(q["type"])}</td><td class="n">{q["taux"]:.0f} %</td>'
-        f'<td class="n">{q["cites"]}/{q["ok"]}</td></tr>'
-        for q in j["lignes"]
-    )
+def _vue_machine(d: dict) -> str:
+    """La vue machine (Passe 1) : ce qui fait tourner l'instrument, pas ce
+    qu'il mesure. Collectes et jeu de requêtes."""
+    return f"""{_vue_collectes(d["collectes"])}
+{_requetes_machine(d["jeu_requetes"])}"""
+
+
+def _requetes_machine(j: dict) -> str:
+    """La carte du jeu de requêtes, SANS le tableau : il a fusionné dans la
+    matrice, qui porte la même information en plus riche. Le formulaire de
+    proposition reste inchangé (il sera traité dans une passe suivante)."""
     return f"""<section class="card">
   <div class="card__head"><h2>Jeu de requêtes</h2>
     <span class="card__hint">version {j['set_version']} · {j['n_requetes']} requêtes ·
@@ -987,10 +980,7 @@ def _vue_requetes(j: dict) -> str:
     <ul id="req-liste"></ul>
     <a id="req-envoyer" class="btn--mini" target="_blank" rel="noopener"
        href="https://github.com/marionbuilds/tracker-geo/issues/new">Transmettre au tracker</a>
-  </div>
-  <div class="tw"><table class="d">
-  <tr><th>Requête</th><th>Réf.</th><th>Type</th><th>Citation</th><th>Ratio</th></tr>
-  {lignes}</table></div></section>"""
+  </div></section>"""
 
 
 def _vue_collectes(c: dict) -> str:
@@ -1024,34 +1014,19 @@ def rendu(d: dict) -> str:
                 stroke="#EFF6E8" stroke-width="1.8" stroke-linecap="round"/></svg>
       </div>
     </div>
-    <button class="nav" role="tab" aria-selected="true" aria-controls="v-res"
-            title="Vue d'ensemble" aria-label="Vue d'ensemble">
+    <button class="nav" role="tab" aria-selected="true" aria-controls="v-prod"
+            title="Produit" aria-label="Produit">
       <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
         <rect x="2" y="2" width="5.2" height="5.2" rx="1.6" stroke="currentColor" stroke-width="1.6"/>
         <rect x="8.8" y="2" width="5.2" height="5.2" rx="1.6" stroke="currentColor" stroke-width="1.6"/>
         <rect x="2" y="8.8" width="5.2" height="5.2" rx="1.6" stroke="currentColor" stroke-width="1.6"/>
-        <rect x="8.8" y="8.8" width="5.2" height="5.2" rx="1.6" stroke="currentColor" stroke-width="1.6"/></svg></button>
-    <button class="nav" role="tab" aria-selected="false" aria-controls="v-suj"
-            title="Moteurs et sujets" aria-label="Moteurs et sujets">
-      <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <rect x="2" y="2" width="12" height="12" rx="2.4" stroke="currentColor" stroke-width="1.6"/>
-        <path d="M2 6.4 H14 M6.4 6.4 V14" stroke="currentColor" stroke-width="1.4"/>
-        <rect x="8.4" y="8.4" width="3.6" height="3.2" rx="1" fill="currentColor"/></svg></button>
-    <button class="nav" role="tab" aria-selected="false" aria-controls="v-req"
-            title="Requêtes" aria-label="Requêtes">
-      <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <rect x="2" y="2" width="12" height="12" rx="3" stroke="currentColor" stroke-width="1.6"/>
-        <circle cx="5.6" cy="5.6" r="1.05" fill="currentColor"/>
-        <circle cx="10.4" cy="5.6" r="1.05" fill="currentColor"/>
-        <circle cx="8" cy="8" r="1.05" fill="currentColor"/>
-        <circle cx="5.6" cy="10.4" r="1.05" fill="currentColor"/>
-        <circle cx="10.4" cy="10.4" r="1.05" fill="currentColor"/></svg></button>
-    <button class="nav" role="tab" aria-selected="false" aria-controls="v-col"
-            title="Collectes" aria-label="Collectes">
+        <rect x="8.8" y="8.8" width="5.2" height="5.2" rx="1.6" stroke="currentColor" stroke-width="1.6"/></svg><span>Produit</span></button>
+    <button class="nav" role="tab" aria-selected="false" aria-controls="v-mach"
+            title="Machine" aria-label="Machine">
       <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
         <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.7"/>
         <path d="M8 4.5 L8 8 L10.6 9.6" stroke="currentColor" stroke-width="1.7"
-              stroke-linecap="round"/></svg></button>
+              stroke-linecap="round"/></svg><span>Machine</span></button>
     <div class="side__sep"></div>
     <div class="side__client" title="{_e(m['client_label'])}">{_e(m['client_initiale'])}</div>
   </aside>
@@ -1089,10 +1064,8 @@ def rendu(d: dict) -> str:
           Créer un rapport</button>
       </div>
     </header>
-    <div id="v-res" role="tabpanel">{_vue_resultats(d)}</div>
-    <div id="v-suj" role="tabpanel" hidden>{_vue_sujets(d)}</div>
-    <div id="v-req" role="tabpanel" hidden>{_vue_requetes(d["jeu_requetes"])}</div>
-    <div id="v-col" role="tabpanel" hidden>{_vue_collectes(d["collectes"])}</div>
+    <div id="v-prod" role="tabpanel">{_vue_produit(d)}</div>
+    <div id="v-mach" role="tabpanel" hidden>{_vue_machine(d)}</div>
   </main>
 </div>
 <style>{CSS}</style>
