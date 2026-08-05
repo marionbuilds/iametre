@@ -986,7 +986,7 @@ def _vue_requetes(j: dict) -> str:
       (~1&nbsp;$/mois par requête) :</p>
     <ul id="req-liste"></ul>
     <a id="req-envoyer" class="btn--mini" target="_blank" rel="noopener"
-       href="https://github.com/marionbuilds/tracker-geo/issues/new">Transmettre au tracker</a>
+       href="https://github.com/marionbuilds/iametre/issues/new">Transmettre au tracker</a>
   </div></section>"""
 
 
