@@ -49,4 +49,24 @@ m3, s3 = analyse(r3, cfg)
 assert m3["cited"] is False and s3 == [] and r3.raw == {"x":1}
 print("OK  erreur moteur non bloquante, brut conserve")
 
-print("\n5/5 tests passes")
+# 6. le JavaScript de l'interface est syntaxiquement valide
+#
+# Panne reelle du 29/07 au 05/08/2026 : la constante JS n'etait pas une chaine
+# brute, Python a converti un « \n » du JavaScript en vrai retour a la ligne,
+# la chaine n'etait plus fermee et TOUT le script mourait au chargement.
+# L'interface restait belle et rien ne cliquait. Ce test rend la panne bruyante.
+import shutil, subprocess, tempfile, pathlib
+from geotracker.dashboard import JS
+
+if shutil.which("node"):
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
+        f.write(JS)
+        chemin = f.name
+    v = subprocess.run(["node", "--check", chemin], capture_output=True, text=True)
+    pathlib.Path(chemin).unlink()
+    assert v.returncode == 0, f"JavaScript invalide :\n{v.stderr}"
+    print("OK  javascript de l'interface valide")
+else:
+    print("--  javascript non verifie (node absent)")
+
+print("\n6/6 tests passes")

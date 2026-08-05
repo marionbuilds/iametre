@@ -44,6 +44,15 @@ NOMS_MOTEURS = {
     "ai_overview": "Google AI Overviews",
 }
 
+# Version courte, pour les en-têtes de colonnes de la matrice moteur × requête.
+NOMS_COURTS = {
+    "openai": "ChatGPT",
+    "perplexity": "Perplexity",
+    "anthropic": "Claude",
+    "anthropic-memory": "Claude mém.",
+    "ai_overview": "Google AIO",
+}
+
 
 # --------------------------------------------------------------------- données
 
@@ -109,6 +118,37 @@ def collecte(conn, run_id: int) -> dict:
         ),
         key=lambda m: m["taux"], reverse=True,
     )
+
+    # Santé de la collecte. Un moteur sans clé valide, ou en panne chez son
+    # fournisseur, est sauté PROPREMENT : le job reste vert et le trou est
+    # silencieux (voir 03-TRACKER-GEO/MEMORY.md, 31/07). Ici il se voit.
+    sante = [
+        dict(id=r["engine_id"], total=r["total"], ok=r["ok"] or 0,
+             erreurs=(r["total"] - (r["ok"] or 0)), exemple=r["exemple"] or "")
+        for r in conn.execute(
+            f"""SELECT engine_id, COUNT(*) AS total,
+                      SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) AS ok,
+                      MAX(error) AS exemple
+               FROM responses WHERE run_id=?{cl_r} GROUP BY engine_id""",
+            (run_id, *pr_r),
+        ).fetchall()
+    ]
+
+    # Matrice moteur × requête : le croisement que ni le taux par requête ni le
+    # taux par moteur ne donnent. C'est là que se lisent les décisions du type
+    # « Google me prend sur la méthode, jamais sur les chiffres ».
+    matrice: dict[str, dict[str, dict]] = {}
+    for r in conn.execute(
+        f"""SELECT prompt_id AS pid, engine_id AS eid,
+                  SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) AS ok,
+                  SUM(COALESCE(cited,0)) AS cites
+           FROM responses WHERE run_id=?{cl_r} GROUP BY prompt_id, engine_id""",
+        (run_id, *pr_r),
+    ).fetchall():
+        matrice.setdefault(r["pid"], {})[r["eid"]] = dict(
+            ok=r["ok"] or 0, cites=r["cites"] or 0,
+            taux=(r["cites"] or 0) / r["ok"] * 100 if r["ok"] else None,
+        )
 
     toutes = sorted(
         (
@@ -198,19 +238,32 @@ def collecte(conn, run_id: int) -> dict:
 
     # Alignement au sujet : QUELLES pages du site les IA citent-elles ?
     # C'est ce qui dit si on est cité pour son offre ou pour un vieux contenu.
+    # On garde le DÉTAIL requête par requête : « quelle intention de recherche
+    # atterrit sur quelle URL » est ce qui dit si le maillage est cohérent, et
+    # c'est le croisement qu'aucun total ne peut restituer.
     agg: dict[str, dict] = {}
     for r in conn.execute(
-        f"""SELECT s.url u, r.prompt_id pid
+        f"""SELECT s.url u, r.prompt_id pid, r.prompt_text ptxt
            FROM sources s JOIN responses r ON r.id=s.response_id
            WHERE r.run_id=? AND s.is_target=1 AND s.url IS NOT NULL AND s.url <> ''{cl_j}""",
         (run_id, *pr_j),
     ).fetchall():
         chemin = urlparse(r["u"]).path.rstrip("/") or "/"
-        e = agg.setdefault(chemin, {"n": 0, "reqs": set()})
+        e = agg.setdefault(chemin, {"n": 0, "reqs": {}})
         e["n"] += 1
-        e["reqs"].add(r["pid"])
+        q = e["reqs"].setdefault(r["pid"], {"texte": r["ptxt"], "n": 0})
+        q["n"] += 1
     pages = sorted(
-        (dict(page=k, n=v["n"], requetes=len(v["reqs"])) for k, v in agg.items()),
+        (
+            dict(
+                page=k, n=v["n"], requetes=len(v["reqs"]),
+                detail=sorted(
+                    (dict(id=i, texte=q["texte"], n=q["n"]) for i, q in v["reqs"].items()),
+                    key=lambda x: x["n"], reverse=True,
+                ),
+            )
+            for k, v in agg.items()
+        ),
         key=lambda x: x["n"], reverse=True,
     )[:6]
 
@@ -279,6 +332,7 @@ def collecte(conn, run_id: int) -> dict:
         "run_id": run_id, "client": meta["client"], "client_label": etiquette,
         "clients": clients_disponibles(), "set_version": set_version, "n_concurrents": n_conc,
         "date": meta["started_at"][:10], "resume": resume, "moteurs": moteurs,
+        "sante": sante, "matrice": matrice,
         "requetes": requetes, "observation": observation, "voix": voix,
         "occupants": occupants, "total_citations": total, "domaines_distincts": distincts,
         "dominance": dominance, "dominance_requetes": dominance_requetes,
@@ -350,8 +404,13 @@ def _lecture_moteur(m: dict, tous: list[dict]) -> str:
     meilleur, pire = max(x["taux"] for x in avec), min(x["taux"] for x in avec)
     rangs = [x["rang"] for x in avec if x["rang"]]
     if m["taux"] >= meilleur:
-        return ("Le moteur le plus favorable, et de loin." if meilleur - pire > 20
-                else "Le moteur le plus favorable.")
+        base = ("Le moteur le plus favorable, et de loin" if meilleur - pire > 20
+                else "Le moteur le plus favorable")
+        # Citée souvent mais bas : le dire, sinon la carte se lit comme une
+        # bonne nouvelle sans réserve (méthode La WAB, cf. CLAUDE.md §4).
+        if m["rang"] and len(rangs) > 1 and m["rang"] >= max(rangs):
+            return f"{base}, mais c'est là que la marque est citée le plus bas."
+        return f"{base}."
     if m["rang"] and rangs and m["rang"] <= min(rangs):
         return "Le plus dur à percer, mais la meilleure place quand la marque y est."
     if m["taux"] <= pire:
@@ -592,12 +651,20 @@ button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-fore
 .queue__rate{font-family:var(--f-mono); font-weight:700; font-size:1.05rem; color:var(--alert);
   white-space:nowrap; flex:none; line-height:1.5}
 .queue__rate--warn{color:var(--opp)}
+.queue__rank{display:block; font-size:.68rem; font-weight:700; text-transform:uppercase;
+  letter-spacing:.09em; color:var(--ink-faint); margin-bottom:5px}
+/* Dans une carte, les vignettes ne peuvent plus être blanches sur blanc. */
+.card .queue{margin-bottom:0}
+.card .queue__card{background:var(--sur-forest); border-color:transparent}
 .btn--mini{border:1px solid var(--line); background:var(--data-soft); color:var(--data-deep);
   border-radius:9px; padding:6px 12px; font-family:inherit; font-size:.78rem; font-weight:700;
   cursor:pointer; margin-top:11px}
 .btn--mini:focus-visible{outline:3px solid var(--data-deep); outline-offset:2px}
 
-.grid{display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:18px}
+/* align-items:start : une carte courte garde sa hauteur au lieu de s'étirer
+   et de laisser un grand vide blanc à côté d'une carte longue. */
+.grid{display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:18px;
+  align-items:start}
 .card{background:var(--paper); border:1px solid var(--line); border-radius:22px;
   padding:24px 26px}
 .card__head{display:flex; align-items:baseline; justify-content:space-between; gap:12px;
@@ -633,7 +700,8 @@ button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-fore
 .st__bar{height:8px; border-radius:99px; background:var(--piste); overflow:hidden}
 .st__bar i{display:block; height:100%; border-radius:99px; background:var(--data)}
 
-.engines{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:18px}
+.engines{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:14px; margin-bottom:18px}
 .eng{background:var(--paper); border:1px solid var(--line); border-radius:var(--r);
   padding:18px 20px}
 .eng h3{font-size:.9rem; font-weight:700; margin-bottom:2px}
@@ -649,6 +717,51 @@ button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-fore
   letter-spacing:.08em; padding:3px 8px; border-radius:6px; margin-top:10px}
 .eng__tag--goal{background:var(--opp-soft); color:var(--opp)}
 .eng__tag--best{background:var(--data-soft); color:var(--data-deep)}
+.health{font-size:.78rem; color:var(--ink-soft); margin-top:8px;
+  padding-left:11px; border-left:2px solid var(--line)}
+.health--ok{border-left-color:var(--data)}
+.health--bad{border-left-color:var(--alert); color:var(--alert); font-weight:600}
+.eng__meta{font-family:var(--f-mono); font-size:.72rem; color:var(--ink-faint);
+  margin-bottom:8px}
+.eng__meta b{color:var(--ink-soft)}
+.eng__warn{color:var(--alert); font-weight:700}
+
+/* Matrice moteur x requete : le croisement, la ou se lisent les decisions. */
+.mx{overflow-x:auto}
+table.mx__t{border-collapse:separate; border-spacing:0; width:100%; font-size:.82rem}
+table.mx__t th,table.mx__t td{padding:7px 8px; border-bottom:1px solid var(--line)}
+table.mx__t thead th{font-size:.68rem; font-weight:700; color:var(--ink-faint);
+  letter-spacing:.05em; text-transform:uppercase; text-align:center; white-space:nowrap;
+  vertical-align:bottom; padding-bottom:9px}
+table.mx__t thead th small{display:block; font-family:var(--f-mono); font-size:.78rem;
+  color:var(--ink-soft); letter-spacing:0; text-transform:none; margin-top:3px}
+table.mx__t th.mx__q{text-align:left; width:38%}
+table.mx__t td.mx__q{text-align:left; color:var(--ink-soft); line-height:1.35;
+  padding-right:16px}
+table.mx__t td.mx__q b{color:var(--ink); font-weight:600}
+.mx__c{text-align:center; font-family:var(--f-mono); font-weight:700; white-space:nowrap}
+.mx__c i{display:block; font-style:normal; border-radius:7px; padding:5px 0}
+.mx--high i{background:var(--data); color:#fff}
+.mx--mid  i{background:var(--data-soft); color:var(--data-deep)}
+.mx--low  i{background:var(--opp-soft); color:var(--opp)}
+.mx--0    i{background:var(--alert-soft); color:var(--alert)}
+.mx--na   i{background:transparent; color:var(--ink-faint)}
+table.mx__t tr:last-child td{border-bottom:none}
+
+/* Alignement : quelle intention de recherche atterrit sur quelle page. */
+.al__row{padding:13px 0; border-bottom:1px solid var(--line)}
+.al__row:last-child{border-bottom:none}
+.al__head{display:flex; align-items:baseline; gap:10px; justify-content:space-between}
+.al__url{font-family:var(--f-mono); font-weight:700; font-size:.88rem; word-break:break-all}
+.al__n{font-family:var(--f-mono); font-size:.78rem; color:var(--ink-faint); white-space:nowrap}
+.al__qs{margin-top:8px; display:grid; gap:3px}
+.al__q{display:flex; justify-content:space-between; align-items:baseline; gap:12px;
+  font-size:.78rem; color:var(--ink-soft); background:var(--piste);
+  border-radius:7px; padding:5px 10px}
+.al__q b{font-family:var(--f-mono); color:var(--ink-faint); font-weight:700}
+.al__flag{display:inline-block; font-size:.68rem; font-weight:700; text-transform:uppercase;
+  letter-spacing:.07em; padding:3px 8px; border-radius:6px; margin-top:9px;
+  background:var(--opp-soft); color:var(--opp)}
 
 svg.curve{display:block; width:100%; height:auto; margin-top:4px}
 .curve__mid{stroke:var(--line); stroke-width:1; stroke-dasharray:3 4}
@@ -707,7 +820,15 @@ table.d tr:last-child td{border-bottom:none}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 """
 
-JS = """
+# ⚠️ Chaîne BRUTE (r"""), obligatoire : sans le r, Python interprète les
+# séquences d'échappement du JavaScript. Un « \n » dans une chaîne JS devient
+# un vrai retour à la ligne, la chaîne n'est plus fermée, et TOUT le script
+# meurt au chargement (navigation, boutons de copie, thème, périodes).
+# Panne réelle introduite par le commit bbad266 (formulaire de proposition de
+# requête) et corrigée le 05/08/2026 : navigation, boutons « Copier », thème et
+# sélecteur de période étaient morts. Invisible tant qu'on ne clique pas.
+# Le test 6 de tests_smoke.py monte la garde (node --check).
+JS = r"""
 (function(){
   document.querySelectorAll('[data-copy]').forEach(function(b){
     b.addEventListener('click',function(){
@@ -899,6 +1020,128 @@ PRINCIPES GEO À RESPECTER
 - Terminer par la FAQ : c'est la partie la plus citée par les moteurs de réponse."""
 
 
+def _matrice(d: dict) -> str:
+    """Le croisement moteur × requête.
+
+    Le taux par requête (tous moteurs confondus) et le taux par moteur (toutes
+    requêtes confondues) sont deux moyennes qui cachent la même chose : QUEL
+    moteur cite sur QUEL sujet. C'est pourtant là que se prennent les
+    décisions, du type « Google me prend sur les questions de méthode et
+    jamais sur les questions de chiffres ».
+    """
+    moteurs, requetes = d["moteurs"], d["requetes"]
+    if not moteurs or not requetes:
+        return ""
+
+    entetes = "".join(
+        f'<th>{_e(NOMS_COURTS.get(m["id"], m["id"]))}<small>{m["taux"]:.0f} %</small></th>'
+        for m in moteurs
+    )
+
+    lignes = ""
+    for q in requetes:
+        cells = ""
+        for m in moteurs:
+            c = d["matrice"].get(q["id"], {}).get(m["id"])
+            if not c or c["taux"] is None:
+                cells += '<td class="mx__c mx--na"><i>·</i></td>'
+                continue
+            t = c["taux"]
+            cls = ("mx--0" if t < 1 else "mx--low" if t < 34
+                   else "mx--mid" if t < 67 else "mx--high")
+            # Le ratio brut, pas le pourcentage : sur 3 à 5 répétitions, un
+            # « 100 % » se lirait comme une certitude alors que c'est 3 appels.
+            cells += f'<td class="mx__c {cls}"><i>{c["cites"]}/{c["ok"]}</i></td>'
+        lignes += (f'<tr><td class="mx__q"><b>{_e(q["id"])}</b> {_e(q["texte"])}</td>'
+                   f'{cells}</tr>')
+
+    # La lecture ne se devine pas : on la calcule et on l'écrit.
+    avec = [m for m in moteurs if m["recherche"]]
+    plus_haut = min(avec, key=lambda m: m["rang"] or 99) if avec else None
+    partout = sum(
+        1 for q in requetes
+        if all((d["matrice"].get(q["id"], {}).get(m["id"]) or {}).get("cites", 0) == 0
+               for m in avec)
+    )
+    lead = ""
+    if plus_haut and plus_haut["rang"]:
+        lead += (f"<strong>{_e(NOMS_COURTS.get(plus_haut['id'], plus_haut['id']))}</strong> "
+                 f"place la marque le plus haut quand il la cite (rang "
+                 f"{_nb(plus_haut['rang'])}). ")
+    if partout:
+        lead += (f"<strong>{partout} requête(s)</strong> ne sortent chez aucun moteur : "
+                 f"ce sont les trous à combler en premier, un contenu les débloque "
+                 f"partout à la fois.")
+    else:
+        lead += "Chaque requête sort au moins chez un moteur."
+
+    return f"""
+  <section class="card">
+    <div class="card__head"><h2>Quel moteur te cite, sur quel sujet</h2>
+      <span class="card__hint">réponses qui citent la marque, sur le nombre d'appels</span></div>
+    <p class="card__lead">{lead}</p>
+    <div class="mx"><table class="mx__t">
+      <thead><tr><th class="mx__q">Requête</th>{entetes}</tr></thead>
+      <tbody>{lignes}</tbody>
+    </table></div>
+  </section>"""
+
+
+def _alignement(d: dict) -> str:
+    """Quelle intention de recherche atterrit sur quelle URL.
+
+    Le total de citations par page dit qu'on est cité ; il ne dit pas si la
+    page citée répond à la question posée. Ce croisement-là est ce qui permet
+    de corriger le maillage : une question précise qui atterrit sur l'accueil
+    est une page dédiée qui manque, pas une victoire.
+    """
+    if not d["pages"]:
+        return """
+  <section class="card">
+    <div class="card__head"><h2>Ce que les IA citent chez toi</h2></div>
+    <p class="card__lead">Aucune page du site citée sur cette collecte.</p>
+  </section>"""
+
+    total = sum(p["n"] for p in d["pages"])
+    rows = ""
+    for p in d["pages"]:
+        qs = "".join(
+            f'<span class="al__q"><span>{_e(q["texte"])}</span><b>{q["n"]}</b></span>'
+            for q in p["detail"][:5]
+        )
+        reste = len(p["detail"]) - 5
+        if reste > 0:
+            qs += f'<span class="al__q"><span>+ {reste} autre(s) requête(s)</span></span>'
+        # Deux signaux actionnables, et seulement ceux-là : l'accueil qui sert
+        # de page d'atterrissage, et la page qui absorbe trop de sujets.
+        flag = ""
+        if p["page"] == "/" and p["requetes"] >= 3:
+            flag = (f'<span class="al__flag">l\'accueil répond à {p["requetes"]} questions '
+                    f'précises : autant de pages dédiées qui manquent</span>')
+        elif p["requetes"] >= 8:
+            flag = (f'<span class="al__flag">cette page absorbe {p["requetes"]} sujets '
+                    f'différents : vérifier qu\'elle répond vraiment à chacun, sinon les '
+                    f'pages dédiées manquent</span>')
+        rows += (f'<div class="al__row"><div class="al__head">'
+                 f'<span class="al__url">{_e(p["page"])}</span>'
+                 f'<span class="al__n">{p["n"]} citations · {p["requetes"]} requêtes</span>'
+                 f'</div><div class="al__qs">{qs}</div>{flag}</div>')
+
+    tete = d["pages"][0]
+    lead = (f"<strong>{_e(tete['page'])}</strong> concentre {tete['n']} des {total} citations "
+            f"de tes pages. Ce qui compte ici n'est pas le total mais la colonne de droite : "
+            f"<strong>la question posée et la page où l'IA envoie la personne doivent "
+            f"parler du même sujet</strong>, sinon la citation ne convertit pas.")
+
+    return f"""
+  <section class="card">
+    <div class="card__head"><h2>Ce que les IA citent chez toi</h2>
+      <span class="card__hint">de la question posée à la page citée</span></div>
+    <p class="card__lead">{lead}</p>
+    {rows}
+  </section>"""
+
+
 def _vue_resultats(d: dict) -> str:
     r = d["resume"]
     taux = r["rate"] or 0
@@ -929,6 +1172,28 @@ def _vue_resultats(d: dict) -> str:
         phrase = (f"{'▲' if haut else '▼'} {_nb(abs(d['delta']))} points depuis la collecte "
                   f"précédente, au-delà de la marge de ±{_nb(marge)} pts : le mouvement est réel.")
 
+    # Santé de la collecte. Un moteur qui tombe ne fait PAS échouer le job : il
+    # est sauté proprement et creuse un trou muet dans la série. Le seul
+    # remède est de le montrer ici, à côté du taux, à chaque lecture.
+    casses = [s for s in d["sante"] if s["erreurs"]]
+    muets = [s for s in d["sante"] if s["ok"] == 0]
+    if muets:
+        noms = ", ".join(NOMS_COURTS.get(s["id"], s["id"]) for s in muets)
+        sante_html = (f'<p class="health health--bad">⚠ {_e(noms)} n\'a rien renvoyé de la '
+                      f'collecte : la série a un trou sur ce moteur, à traiter avant '
+                      f'le prochain lundi.</p>')
+    elif casses:
+        detail = " · ".join(
+            f'{NOMS_COURTS.get(s["id"], s["id"])} {s["ok"]}/{s["total"]}' for s in casses
+        )
+        sante_html = (f'<p class="health">Collecte complète à '
+                      f'{r["ok"] / r["n"] * 100:.0f} % : {_e(detail)}. '
+                      f'Les appels perdus sont exclus du calcul, ils ne font pas '
+                      f'baisser le taux.</p>')
+    else:
+        sante_html = (f'<p class="health health--ok">Collecte complète : les '
+                      f'{len(d["moteurs"])} moteurs ont répondu, aucun appel perdu.</p>')
+
     reste_txt = f"<strong>+{reste:.0f} pts restants</strong>"
     if contenus:
         reste_txt += f" · <strong>{contenus} à {contenus + 1} contenus</strong>"
@@ -956,16 +1221,36 @@ def _vue_resultats(d: dict) -> str:
     </div>
   </section>"""
 
-    suite = [q for q in trous if cible is None or q["id"] != cible["id"]][:2]
+    # Les opportunités n°2 et n°3. On ne se limite PAS aux requêtes sous le
+    # seuil de trou : il y en a rarement trois, et la question « qu'est-ce que
+    # j'écris ensuite ? » se pose à chaque collecte. On classe par impact tout
+    # ce qui n'est pas déjà une forteresse.
+    candidats = sorted(
+        (q for q in d["requetes"]
+         if q["taux"] < 60 and (cible is None or q["id"] != cible["id"])),
+        key=lambda q: _impact(q, d["requetes"], r), reverse=True,
+    )[:2]
     queue = "".join(
         f'<article class="queue__card"><div class="queue__txt">'
-        f'<h3>{_cite(q["texte"])}</h3><p>{_e(_diagnostic(q))}</p>'
+        f'<span class="queue__rank">Article n°{i}</span>'
+        f'<h3>{_cite(q["texte"])}</h3><p>{_e(_diagnostic(q))} '
+        f'<strong>{_e(_promesse(_impact(q, d["requetes"], r)))}</strong> sur le taux global.</p>'
         f'<button class="btn--mini" data-copy="{_e(_prompt_ia(q, d))}" '
         f'data-ok="Recette copiée">Copier la recette d\'article</button></div>'
         f'<div class="queue__rate{" queue__rate--warn" if q["taux"] >= 10 else ""}">'
         f'{q["taux"]:.0f} %</div></article>'
-        for q in suite
+        for i, q in enumerate(candidats, start=2)
     )
+    if queue:
+        queue = f"""
+  <section class="card">
+    <div class="card__head"><h2>Les articles à créer</h2>
+      <span class="card__hint">après la mission n°1 ci-dessus</span></div>
+    <p class="card__lead">Ces sujets sont ceux où <strong>un contenu neuf te ferait
+    apparaître dans les réponses d'IA</strong>. Ils sont classés par ce qu'ils rapporteraient
+    au taux global, pas par volume de recherche : c'est la logique du GEO.</p>
+    <div class="queue">{queue}</div>
+  </section>"""
 
     tete = d["voix"][0]["part"] if d["voix"] else 1
     lb = ""
@@ -988,6 +1273,7 @@ def _vue_resultats(d: dict) -> str:
         for q in forts
     )
 
+    sante = {s["id"]: s for s in d["sante"]}
     eng, meilleur = "", max((x["taux"] for x in d["moteurs"]), default=0)
     for m in d["moteurs"]:
         tag = ""
@@ -995,10 +1281,20 @@ def _vue_resultats(d: dict) -> str:
             tag = '<span class="eng__tag eng__tag--best">Ton allié</span>'
         elif not m["recherche"]:
             tag = '<span class="eng__tag eng__tag--goal">Objectif long terme</span>'
+        # Le rang compte autant que le taux : citée souvent mais en 6e source
+        # ne vaut pas citée rarement mais en 1re. Les deux, côte à côte.
+        s = sante.get(m["id"], {})
+        rang = (f'rang moyen <b>{_nb(m["rang"])}</b>' if m["rang"]
+                else '<b>aucune citation</b>')
+        appels = f'{s.get("ok", m["ok"])} appels'
+        if s.get("erreurs"):
+            appels = (f'<span class="eng__warn">{s["ok"]}/{s["total"]} appels, '
+                      f'{s["erreurs"]} échec(s)</span>')
         eng += (f'<article class="eng{" eng--zero" if m["taux"] < 1 else ""}">'
                 f'<h3>{_e(NOMS_MOTEURS.get(m["id"], m["id"]))}</h3>'
                 f'<div class="eng__rate">{m["taux"]:.0f} %</div>'
                 f'<div class="eng__bar"><i style="width:{max(m["taux"], 2):.0f}%"></i></div>'
+                f'<div class="eng__meta">{rang} · {appels}</div>'
                 f'<p>{_e(_lecture_moteur(m, d["moteurs"]))}</p>{tag}</article>')
 
     if len(d["serie"]) > 1:
@@ -1036,7 +1332,8 @@ def _vue_resultats(d: dict) -> str:
         for x in d["dominance_requetes"][:5]
     ) or "<li>Aucune citation sur cette collecte.</li>"
 
-    # Alignement au sujet : par quelle porte les IA citent-elles le site ?
+    # Alignement au sujet, version courte : par quelle porte les IA citent-elles
+    # le site ? Le détail requête par requête vit dans la vue « Sujets ».
     pages_total = sum(p["n"] for p in d["pages"])
     pages_l = "".join(
         f'<tr><td class="fort">{_e(p["page"])}</td><td class="n">{p["n"]}</td>'
@@ -1093,7 +1390,8 @@ def _vue_resultats(d: dict) -> str:
     <div class="hero__mid">
       <h2>{titre}{badge}</h2>
       <p class="eyebrow">Visibilité IA</p>
-      <p>Mesuré sur <strong>{r['n']} appels</strong>, {len(d['moteurs'])} moteurs. {_e(phrase)}</p>
+      <p>Mesuré sur <strong>{r['ok']} appels réussis</strong>, {len(d['moteurs'])} moteurs. {_e(phrase)}</p>
+      {sante_html}
       <div class="ruler">
         <div class="ruler__track">
           <span class="ruler__ticks"></span>
@@ -1114,8 +1412,9 @@ def _vue_resultats(d: dict) -> str:
         <div class="stat__lbl">rang moyen dans les sources</div></div>
     </div>
   </section>
+  <div class="engines">{eng}</div>
 {mission}
-  <section class="queue">{queue}</section>
+{queue}
 
   <div class="grid">
     <section class="card">
@@ -1152,8 +1451,6 @@ def _vue_resultats(d: dict) -> str:
     </section>
   </div>
 {duel_html}
-
-  <div class="engines">{eng}</div>
 
 {_courbe(d, marge)}"""
 
@@ -1217,6 +1514,16 @@ def _courbe(d: dict, marge: float) -> str:
   <div class="curve__cap"><span>{_e(serie[0]["date"])}</span>
     <span>{_e(dernier["date"])}</span></div>
 </section>"""
+
+
+def _vue_sujets(d: dict) -> str:
+    """La vue d'analyse : le détail que la vue d'ensemble ne doit pas porter.
+
+    Règle de l'interface (Marion, 05/08/2026) : la première vue est un
+    tableau de bord, on y comprend sa situation en quelques secondes. Tout
+    ce qui demande à être lu ligne par ligne vit ici.
+    """
+    return f"{_matrice(d)}\n{_alignement(d)}"
 
 
 def _vue_requetes(d: dict) -> str:
@@ -1314,6 +1621,12 @@ def rendu(d: dict) -> str:
         <rect x="8.8" y="2" width="5.2" height="5.2" rx="1.6" stroke="currentColor" stroke-width="1.6"/>
         <rect x="2" y="8.8" width="5.2" height="5.2" rx="1.6" stroke="currentColor" stroke-width="1.6"/>
         <rect x="8.8" y="8.8" width="5.2" height="5.2" rx="1.6" stroke="currentColor" stroke-width="1.6"/></svg></button>
+    <button class="nav" role="tab" aria-selected="false" aria-controls="v-suj"
+            title="Moteurs et sujets" aria-label="Moteurs et sujets">
+      <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <rect x="2" y="2" width="12" height="12" rx="2.4" stroke="currentColor" stroke-width="1.6"/>
+        <path d="M2 6.4 H14 M6.4 6.4 V14" stroke="currentColor" stroke-width="1.4"/>
+        <rect x="8.4" y="8.4" width="3.6" height="3.2" rx="1" fill="currentColor"/></svg></button>
     <button class="nav" role="tab" aria-selected="false" aria-controls="v-req"
             title="Requêtes" aria-label="Requêtes">
       <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -1375,6 +1688,7 @@ def rendu(d: dict) -> str:
       <span class="chip chip--etat" id="per-etat">toutes les collectes</span>
     </div>
     <div id="v-res" role="tabpanel">{_vue_resultats(d)}</div>
+    <div id="v-suj" role="tabpanel" hidden>{_vue_sujets(d)}</div>
     <div id="v-req" role="tabpanel" hidden>{_vue_requetes(d)}</div>
     <div id="v-col" role="tabpanel" hidden>{_vue_collectes(d)}</div>
   </main>
