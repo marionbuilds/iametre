@@ -74,6 +74,9 @@ class ClientConfig:
     attributs: list = field(default_factory=list)
     # Expérience contrôlée (chantier a) : bloc figé du YAML, tel quel.
     experience: dict | None = None
+    # Garde-fou du carnet d'idées (06/08/2026) : l'import refuse d'ajouter
+    # une requête en observation au-delà de ce plafond.
+    plafond_observation: int = 5
     path: Path = field(default=None, repr=False)
 
     def competitor_label(self, domain: str) -> str | None:
@@ -141,6 +144,7 @@ def load_client(name: str) -> ClientConfig:
         rival=raw.get("rival"),
         attributs=raw.get("attributs", []),
         experience=raw.get("experience"),
+        plafond_observation=int(raw.get("plafond_observation", 5)),
         engines=engines,
         repetitions=int(sampling.get("repetitions", 5)),
         repetitions_ai_overview=int(sampling.get("repetitions_ai_overview", 3)),

@@ -197,16 +197,22 @@ de la vue produit).
 | `pages[].reste` | int | requêtes au-delà des 5 affichées (0 = pas de ligne « + N autre(s) ») |
 | `pages[].flag` | dict\|null | `{variante: "accueil"\|"absorbe", n: int}` — seuils : accueil ≥ 3 requêtes, page ≥ 8 requêtes (l.1097-1104) |
 
-### 3.14 `jeu_requetes` — vue « Machine »
+### 3.14 `jeu_requetes` — vue « Requêtes » (carnet d'idées, 06/08/2026)
 
 | Champ | Type | Provenance actuelle |
 |---|---|---|
 | `set_version` / `n_requetes` / `n_concurrents` | int | config |
+| `client` | str | config — embarqué dans le JSON de la page pour nommer le fichier d'export |
+| `suivies` | list | `[{id, texte}]` de TOUTES les requêtes de la CONFIG (titulaires + observation) : contrôle de doublon côté navigateur, y compris pour une requête importée sans donnée encore |
+| `observation.lignes` | list | requêtes `statut: observation` de la config, taux/cites/ok depuis les données (`taux: null` = « en attente de première collecte ») |
+| `observation.plafond` | int | YAML `plafond_observation` (défaut 5) |
 
-Passe 1 : le tableau des requêtes (`lignes`) a fusionné dans la matrice, qui porte
-la même information en plus riche. Ne restent que les compteurs, pour la carte du
-formulaire de proposition (vue Machine). Le formulaire et le lien GitHub restent du
-gabarit statique du render, inchangés (traités dans une passe suivante).
+Le tableau des titulaires reste fusionné dans la matrice (Passe 1). Le formulaire
+alimente un brouillon localStorage (avertissement de fragilité affiché), le bouton
+« Télécharger pour import » produit `propositions-requetes.json`, et
+`python -m geotracker.carnet` l'importe dans le YAML (insertion textuelle,
+validation-restauration, plafond, commit-push proposé). Le lien vers les issues
+GitHub a été supprimé : c'était le contournement.
 
 ### 3.15 `collectes` — vue « Collectes »
 

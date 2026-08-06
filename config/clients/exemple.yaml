@@ -61,6 +61,11 @@ attributs:
     label: "L'atelier artisanal"
     termes: ["artisan", "atelier"]
 
+# Garde-fou du carnet d'idées : nombre maximal de requêtes en observation.
+# L'import (python -m geotracker.carnet) refuse au-delà : chaque requête
+# coûte ~1 $/mois de collecte, le plafond empêche la dérive silencieuse.
+plafond_observation: 5
+
 # Échantillonnage. Une réponse de LLM est non déterministe : on ne constate
 # pas, on échantillonne.
 sampling:

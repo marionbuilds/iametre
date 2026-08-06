@@ -80,7 +80,28 @@ t4, _ = attributs_dans("Voir maison-dupont.fr/tables-chene-sur-mesure pour comma
 assert t4 == set(), t4
 print("OK  attributs : co-presence par phrase, domaines non coupes, slugs exclus")
 
-# 7. le JavaScript de l'interface est syntaxiquement valide
+# 7. carnet d'idees : insertion textuelle dans le YAML, commentaires intacts
+import yaml as _yaml
+from geotracker.carnet import inserer_prompts, prochain_id
+
+assert prochain_id(["q01", "q02", "q03"]) == "q04"
+assert prochain_id([]) == "q01"
+
+_texte = cfg.path.read_text(encoding="utf-8")
+_nouveau = inserer_prompts(_texte, [("q04", 'Ou trouver une table "rustique" ?')],
+                           "2026-08-06")
+_relu = _yaml.safe_load(_nouveau)
+assert len(_relu["prompts"]) == 4
+assert _relu["prompts"][3] == {"id": "q04",
+                              "text": 'Ou trouver une table "rustique" ?',
+                              "statut": "observation"}
+# La chirurgie preserve TOUT le reste du fichier : memes commentaires,
+# memes cles, seule la fin du bloc prompts a change.
+assert _nouveau.count("#") == _texte.count("#") + 1  # le commentaire d'import
+assert "plafond_observation: 5" in _nouveau
+print("OK  carnet : insertion chirurgicale, ids, guillemets echappes")
+
+# 8. le JavaScript de l'interface est syntaxiquement valide
 #
 # Panne reelle du 29/07 au 05/08/2026 : la constante JS n'etait pas une chaine
 # brute, Python a converti un « \n » du JavaScript en vrai retour a la ligne,
@@ -100,4 +121,4 @@ if shutil.which("node"):
 else:
     print("--  javascript non verifie (node absent)")
 
-print("\n7/7 tests passes")
+print("\n8/8 tests passes")

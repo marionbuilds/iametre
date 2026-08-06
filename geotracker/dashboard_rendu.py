@@ -127,6 +127,14 @@ body{font-family:var(--f-body); background:var(--bg); color:var(--ink); line-hei
 .reqattente{border:1px dashed var(--line); border-radius:14px; padding:14px 16px;
   margin-bottom:16px}
 .reqattente__t{font-size:.78rem; font-weight:600; color:var(--ink-soft); margin-bottom:8px}
+/* Carnet d'idées (06/08) : messages d'erreur visibles, avertissement de
+   fragilité du brouillon navigateur, aide d'import, bloc observation. */
+.req-erreur{color:var(--alert); font-size:.8rem; font-weight:600; margin:-6px 0 12px}
+.reqattente__avert{font-size:.75rem; font-weight:600; color:var(--opp); margin:10px 0}
+.reqattente__aide{font-size:.75rem; color:var(--ink-faint); margin-top:8px}
+.reqattente__aide code, .obs code{font-family:var(--f-mono); font-size:.72rem;
+  background:var(--piste); border-radius:5px; padding:1px 5px}
+.obs{margin-top:22px; border-top:1px solid var(--line); padding-top:18px}
 .reqattente ul{list-style:none; display:grid; gap:6px; margin-bottom:10px}
 .reqattente li{display:flex; align-items:center; justify-content:space-between; gap:12px;
   font-size:.88rem; background:var(--data-soft); color:var(--ink);
@@ -502,12 +510,29 @@ JS = r"""
     try{if(v){localStorage.setItem(CLE,v);}else{localStorage.removeItem(CLE);}}catch(e){}
     appliqueTheme(v);
   });});
+  // Carnet d'idees (06/08/2026) : le brouillon vit dans localStorage, le
+  // vrai chemin est le telechargement + import CLI (une page file:// ne
+  // peut pas ecrire sur le disque). Chaque refus est DIT, jamais muet.
   var CLE_REQ='iametre-requetes-proposees',
       champ=document.getElementById('req-champ'),
       valider=document.getElementById('req-valider'),
       attente=document.getElementById('req-attente'),
       listeEl=document.getElementById('req-liste'),
-      envoyer=document.getElementById('req-envoyer');
+      telecharger=document.getElementById('req-telecharger'),
+      erreur=document.getElementById('req-erreur'),
+      donneesEl=document.getElementById('req-donnees');
+  var suivies=[], client='';
+  try{
+    var d=JSON.parse(donneesEl?donneesEl.textContent:'{}');
+    suivies=d.suivies||[]; client=d.client||'';
+  }catch(e){}
+  function plier(t){
+    return (t||'').toLowerCase().normalize('NFD')
+      .replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
+  }
+  function ditErreur(msg){
+    if(erreur){erreur.textContent=msg||''; erreur.hidden=!msg;}
+  }
   function litProps(){
     try{return JSON.parse(localStorage.getItem(CLE_REQ)||'[]');}catch(e){return [];}
   }
@@ -530,26 +555,42 @@ JS = r"""
       });
       li.appendChild(s); li.appendChild(x); listeEl.appendChild(li);
     });
-    if(envoyer){
-      var corps='Requetes a ajouter au jeu de suivi (statut : en observation) :\n\n'
-                +l.map(function(q){return '- '+q;}).join('\n');
-      envoyer.href='https://github.com/marionbuilds/iametre/issues/new'
-        +'?title='+encodeURIComponent('Ajout de requetes au jeu de suivi')
-        +'&body='+encodeURIComponent(corps);
-    }
   }
   if(valider){
     valider.addEventListener('click',function(){
       var v=(champ.value||'').trim();
-      if(v.length<10){champ.focus();return;}
-      var l=litProps();
-      if(l.indexOf(v)===-1){l.push(v);ecritProps(l);}
-      champ.value=''; dessine();
+      if(v.length<10){
+        ditErreur('Trop court : formule la question comme tu la poserais \u00e0 une IA (10 caract\u00e8res minimum).');
+        champ.focus(); return;
+      }
+      var pv=plier(v);
+      var deja=null;
+      suivies.forEach(function(s){if(plier(s.texte)===pv){deja=s;}});
+      if(deja){ditErreur('D\u00e9j\u00e0 suivie ('+deja.id+').'); return;}
+      var l=litProps(), doublon=false;
+      l.forEach(function(q){if(plier(q)===pv){doublon=true;}});
+      if(doublon){ditErreur('D\u00e9j\u00e0 dans ta liste d\u2019attente.'); return;}
+      ditErreur('');
+      l.push(v); ecritProps(l); champ.value=''; dessine();
     });
     champ.addEventListener('keydown',function(e){
       if(e.key==='Enter'){valider.click();}
     });
+    champ.addEventListener('input',function(){ditErreur('');});
     dessine();
+  }
+  if(telecharger){
+    telecharger.addEventListener('click',function(){
+      var l=litProps();
+      if(!l.length){ditErreur('Rien \u00e0 t\u00e9l\u00e9charger : la liste d\u2019attente est vide.'); return;}
+      var contenu={client:client, date:new Date().toISOString().slice(0,10), propositions:l};
+      var blob=new Blob([JSON.stringify(contenu,null,2)],{type:'application/json'});
+      var a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);
+      a.download='propositions-requetes.json';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+    });
   }
 })();
 """
@@ -978,9 +1019,42 @@ def _vue_citations(d: dict) -> str:
 
 
 def _vue_requetes(j: dict) -> str:
-    """La carte du jeu de requêtes, SANS le tableau : il a fusionné dans la
-    matrice, qui porte la même information en plus riche. Le formulaire de
-    proposition reste inchangé (il sera traité dans une passe suivante)."""
+    """Le carnet d'idées (06/08/2026). Une idée tapée ici finit dans le YAML
+    au statut observation, par le chemin en deux temps : la page fait
+    TÉLÉCHARGER un fichier de propositions (une page file:// ne peut pas
+    écrire sur le disque), et `python -m geotracker.carnet` l'importe.
+    Les requêtes en observation s'affichent en dessous, collectées mais hors
+    taux global."""
+    import json as _json
+    donnees_js = _json.dumps(
+        {"client": j["client"], "suivies": j["suivies"]}, ensure_ascii=False
+    ).replace("</", "<\\/")
+
+    obs = j["observation"]
+    obs_html = ""
+    if obs["lignes"]:
+        lignes_obs = "".join(
+            f'<tr><td>{_e(q["texte"])}</td><td class="n">{_e(q["id"])}</td>'
+            + (f'<td class="n">{q["taux"]:.0f} %</td><td class="n">{q["cites"]}/{q["ok"]}</td>'
+               if q["taux"] is not None else
+               '<td class="n" colspan="2">en attente de première collecte</td>')
+            + '</tr>'
+            for q in obs["lignes"]
+        )
+        obs_html = f"""
+  <div class="obs">
+    <div class="card__head"><h2>En observation</h2>
+      <span class="card__hint">{len(obs['lignes'])}/{obs['plafond']} ·
+      ≈ +{len(obs['lignes'])}&nbsp;$/mois · hors taux global</span></div>
+    <p class="card__lead">Ces requêtes sont collectées et mesurées, mais n'entrent ni dans le
+    taux global ni dans le périmètre de comparaison : on peut les <strong>tester sans faire
+    bouger la série</strong>. Bonnes sur 2-3 collectes, elles sont promues titulaires (dans
+    le YAML, en retirant leur ligne <code>statut</code>).</p>
+    <div class="tw"><table class="d">
+    <tr><th>Requête</th><th>Réf.</th><th>Citation</th><th>Ratio</th></tr>
+    {lignes_obs}</table></div>
+  </div>"""
+
     return f"""<section class="card">
   <div class="card__head"><h2>Jeu de requêtes</h2>
     <span class="card__hint">version {j['set_version']} · {j['n_requetes']} requêtes ·
@@ -995,13 +1069,18 @@ def _vue_requetes(j: dict) -> str:
            aria-label="Nouvelle requête à suivre">
     <button class="btn--report" id="req-valider">Valider</button>
   </div>
+  <p class="req-erreur" id="req-erreur" role="alert" hidden></p>
   <div class="reqattente" id="req-attente" hidden>
-    <p class="reqattente__t">En attente d'intégration à la prochaine collecte
+    <p class="reqattente__t">En attente d'import dans le jeu de suivi
       (~1&nbsp;$/mois par requête) :</p>
     <ul id="req-liste"></ul>
-    <a id="req-envoyer" class="btn--mini" target="_blank" rel="noopener"
-       href="https://github.com/marionbuilds/iametre/issues/new">Transmettre au tracker</a>
-  </div></section>"""
+    <p class="reqattente__avert">⚠ Ces idées ne sont enregistrées que dans CE navigateur
+      tant qu'elles ne sont pas importées.</p>
+    <button class="btn--mini" id="req-telecharger">Télécharger pour import</button>
+    <p class="reqattente__aide">Puis : <code>python -m geotracker.carnet
+      ~/Downloads/propositions-requetes.json</code></p>
+  </div>{obs_html}
+  <script type="application/json" id="req-donnees">{donnees_js}</script></section>"""
 
 
 def _vue_collectes(c: dict) -> str:

@@ -164,6 +164,9 @@ def _collecte(conn, run_id: int) -> dict:
         key=lambda q: q["taux"], reverse=True,
     )
     requetes = [q for q in toutes if q["statut"] != "observation"]
+    # Le bloc « En observation » est revenu avec le carnet d'idées (06/08) :
+    # les requêtes proposées y atterrissent, collectées mais hors agrégats.
+    observation = [q for q in toutes if q["statut"] == "observation"]
 
     total = conn.execute(
         f"""SELECT COUNT(*) n FROM sources s JOIN responses r ON r.id=s.response_id
@@ -324,6 +327,14 @@ def _collecte(conn, run_id: int) -> dict:
         "pages": pages, "duel": duel, "rival": rival, "rival_label": rival_label,
         "historique": historique, "serie": serie, "delta": delta,
         "delta_ctx": delta_ctx, "serie_ctx": serie_ctx,
+        "observation": observation,
+        "plafond_observation": cfg.plafond_observation,
+        # La CONFIG fait foi pour la liste des requêtes suivies : une requête
+        # importée entre deux collectes n'a encore aucune réponse en base,
+        # elle doit pourtant exister pour le contrôle de doublon et le bloc
+        # observation (« en attente de première collecte »).
+        "prompts_config": [{"id": q.id, "texte": q.text, "statut": q.statut}
+                           for q in cfg.prompts],
         "produit": load_produit(),
     }
 
@@ -757,13 +768,34 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
         })
     alignement = {"vide": not d["pages"], "lead": lead_pages, "pages": pages_align}
 
-    # Le tableau des requêtes a fusionné dans la matrice (Passe 1), qui porte
-    # la même information en plus riche. Ne restent que les compteurs du jeu,
-    # pour la carte du formulaire de proposition (vue Machine).
+    # Le tableau des requêtes a fusionné dans la matrice (Passe 1). La carte
+    # porte les compteurs, le carnet d'idées (06/08) et le bloc observation :
+    # `suivies` sert au contrôle de doublon côté navigateur, `observation`
+    # affiche les requêtes proposées, collectées mais hors agrégats.
     jeu_requetes = {
         "set_version": d["set_version"],
         "n_requetes": len(d["requetes"]),
         "n_concurrents": d["n_concurrents"],
+        "client": d["client"],
+        "suivies": [{"id": q["id"], "texte": q["texte"]}
+                    for q in d["prompts_config"]],
+        "observation": {
+            "lignes": [
+                {
+                    "id": q["id"], "texte": q["texte"],
+                    # Les taux viennent des DONNÉES ; une requête importée
+                    # entre deux collectes n'en a pas encore : taux None,
+                    # le render affiche « en attente de première collecte ».
+                    **next(
+                        ({"taux": x["taux"], "cites": x["cites"], "ok": x["ok"]}
+                         for x in d["observation"] if x["id"] == q["id"]),
+                        {"taux": None, "cites": 0, "ok": 0},
+                    ),
+                }
+                for q in d["prompts_config"] if q["statut"] == "observation"
+            ],
+            "plafond": d["plafond_observation"],
+        },
     }
 
     collectes = {
