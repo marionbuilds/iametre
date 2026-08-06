@@ -12,3 +12,11 @@ __pycache__/
 .DS_Store
 data/*.sqlite3-journal
 reports/*.html
+
+# ── Miroir public : les données ne rentrent JAMAIS ici ────────────────────────
+# Le dépôt de travail privé versionne la base (c'est le mécanisme de
+# persistance de la collecte). Ce miroir ne porte que le code : ces règles
+# empêchent de recommiter des données par accident.
+data/
+reports/
+config/clients/smart-bpjeps.yaml

@@ -1,10 +1,9 @@
+# Miroir public : la planification est retirée ; la collecte tourne dans le dépôt de travail privé.
 name: Run hebdomadaire du tracker GEO
 
 # Le run tourne sur les serveurs GitHub, pas sur le Mac de Marion.
 # La collecte continue même pendant le déménagement à Montréal.
 on:
-  schedule:
-    - cron: "0 6 * * 1" # tous les lundis à 06h00 UTC
   workflow_dispatch: # bouton "lancer maintenant" dans l'onglet Actions
 
 permissions:

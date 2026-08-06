@@ -1,3 +1,4 @@
+# Miroir public : la planification est retirée ; la collecte tourne dans le dépôt de travail privé.
 name: Mesure d'impact après publication
 
 # Le parcours utilisateur vu par Marion (29/07/2026) : « je viens de publier
@@ -20,8 +21,6 @@ on:
         description: "Ce qui vient d'être publié"
         required: false
         default: "publication"
-  schedule:
-    - cron: "0 7 * * *"
 
 permissions:
   contents: write
