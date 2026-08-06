@@ -68,7 +68,17 @@ assert trouves == {"bois-massif", "sur-mesure"}, trouves
 assert "chêne" in exemples["bois-massif"]
 t2, _ = attributs_dans("L'atelier travaille le chêne.", cfg.brand_terms, cfg.attributs)
 assert t2 == set(), t2
-print("OK  attributs : co-presence par phrase, pas de comptage hors marque")
+# Le point d'un domaine ne coupe PAS la phrase (defaut v1 corrige le 06/08) :
+# la marque en forme de domaine garde son contexte.
+t3, _ = attributs_dans("Le site maison-dupont.fr propose des tables en chêne.",
+                       cfg.brand_terms, cfg.attributs)
+assert t3 == {"bois-massif"}, t3
+# Un slug d'URL ne fabrique PAS un attribut (2e piege corrige le 06/08) : la
+# marque est nommee par le lien, mais rien n'est DIT en prose.
+t4, _ = attributs_dans("Voir maison-dupont.fr/tables-chene-sur-mesure pour commander.",
+                       cfg.brand_terms, cfg.attributs)
+assert t4 == set(), t4
+print("OK  attributs : co-presence par phrase, domaines non coupes, slugs exclus")
 
 # 7. le JavaScript de l'interface est syntaxiquement valide
 #

@@ -32,9 +32,14 @@ from .extract import _fold
 
 
 def _phrases(texte: str) -> list[str]:
-    """Découpage volontairement fruste : points, exclamations, interrogations,
-    retours à la ligne (les réponses d'IA sont pleines de listes à puces)."""
-    return [p for p in re.split(r"[.!?\n]+", texte or "") if p.strip()]
+    """Découpage en phrases : retours à la ligne (les réponses d'IA sont
+    pleines de listes à puces) et ponctuation finale SUIVIE D'UN ESPACE.
+
+    ⚠️ Le point n'est séparateur que suivi d'un espace : sinon il découpe
+    « smart-bpjeps.com » en deux et arrache la marque à sa phrase — défaut
+    v1 trouvé le 06/08 en vérifiant les zéros, qui faisait perdre le contexte
+    de TOUTES les mentions sous forme de domaine."""
+    return [p for p in re.split(r"\n+|(?<=[.!?])\s+", texte or "") if p.strip()]
 
 
 def _contient(phrase_pliee: str, terme: str) -> bool:
@@ -42,20 +47,29 @@ def _contient(phrase_pliee: str, terme: str) -> bool:
     return re.search(pattern, phrase_pliee) is not None
 
 
+_URL = re.compile(r"https?://\S+|\S*www\.\S+|\S+\.(?:com|fr|org|net|io)/\S*")
+
+
 def attributs_dans(texte: str, brand_terms: list[str], lexique: list[dict]) -> tuple[set, dict]:
     """Les attributs co-présents avec la marque dans une même phrase.
 
     Renvoie (ids trouvés, un exemple de phrase par attribut). Pure et
     déterministe : appelable sur n'importe quel texte, sans base présente.
-    """
+
+    ⚠️ Règle d'honnêteté (2e piège trouvé le 06/08 en vérifiant les zéros) :
+    la marque peut être nommée par son DOMAINE (un lien la nomme), mais un
+    attribut doit être DIT EN PROSE — jamais compté depuis une URL, sinon on
+    mesure nos propres slugs (/oral-bpjeps, /livre-bpjeps) en écho, pas ce
+    que le modèle associe à la marque."""
     trouves: set[str] = set()
     exemples: dict[str, str] = {}
     for phrase in _phrases(texte):
         pliee = _fold(phrase)
         if not any(_contient(pliee, t) for t in brand_terms):
             continue
+        prose = _fold(_URL.sub(" ", phrase))
         for attribut in lexique:
-            if any(_contient(pliee, terme) for terme in attribut["termes"]):
+            if any(_contient(prose, terme) for terme in attribut["termes"]):
                 trouves.add(attribut["id"])
                 exemples.setdefault(attribut["id"], phrase.strip())
     return trouves, exemples
