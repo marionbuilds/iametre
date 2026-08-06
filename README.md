@@ -41,6 +41,20 @@ Puis on agrège en taux, et on rejoue chaque semaine pour obtenir une courbe.
 
 Le mode `anthropic-memory` interroge le modèle **sans recherche web**. Il ne mesure donc pas ce que le modèle trouve, mais ce qu'il sait : la marque est-elle connue sans aller la chercher ? C'est l'indicateur le plus lent à bouger de tous ceux suivis ici.
 
+## Les attributs : ce que le modèle dit de la marque
+
+Être cité répond à « est-ce qu'on me voit ». La question suivante est « qu'est-ce que le modèle dit de moi » : quels attributs il associe à la marque quand il en parle — le livre, les fiches, la plateforme, la personne qui la porte.
+
+```bash
+python -m geotracker.attributs        # rejoué sur tout l'historique
+```
+
+La règle de comptage : un attribut compte quand un de ses termes apparaît **dans la même phrase** qu'une mention de la marque, et jamais depuis une URL — un lien vers `/oral-bpjeps` nomme la marque, il ne dit rien d'elle. Le lexique d'attributs vit dans le YAML du client, comme le reste.
+
+Deux limites, assumées : le découpage de phrases est fruste (dans les listes à puces, la marque et l'attribut se retrouvent parfois séparés — les chiffres sont donc des bornes basses), et le lexique de départ est minimal ; il s'enrichit dans le YAML sans coût, puisque l'extraction se rejoue.
+
+Un point de méthode qui compte : cette métrique a été écrite le 6 août et s'est calculée sur les collectes du 28 juillet. C'est ce que permet la conservation du brut : les agrégats se recalculent, y compris ceux qui n'existaient pas encore au moment de la collecte.
+
 ## Les deux garde-fous
 
 **La marge de fluctuation.** Un taux de citation calculé sur un échantillon a une marge d'erreur. Elle est calculée à 95 % (`_marge()`, dans `dashboard_donnees.py`) et l'outil **refuse d'appeler « progression » un mouvement qui tient dedans** : il l'écrit à l'écran, en toutes lettres.
@@ -49,6 +63,10 @@ Le mode `anthropic-memory` interroge le modèle **sans recherche web**. Il ne me
 
 
 **La comparabilité de périmètre.** Deux collectes ne se comparent que si elles portent sur les **mêmes moteurs** et les **mêmes requêtes**. Quand ce n'est pas le cas, la collecte est écartée du calcul et le rapport le dit, plutôt que de produire un écart qui ne veut rien dire. Même logique pour les appels en échec : ils sont **exclus du taux** au lieu d'être comptés comme des non-citations, sinon une panne d'API ressemble à une chute de visibilité.
+
+## Une expérience en cours : le balisage change-t-il la citation ?
+
+Baliser une page en données structurées change-t-il son taux de citation dans les réponses d'IA ? Personne ne l'a tranché publiquement. Depuis le 6 août, une page du site est destinée au balisage et trois autres servent de témoin, répartition figée dans le YAML. Deux limites annoncées d'emblée : la puissance statistique ne permettra pas de détecter un effet réaliste avant plusieurs mois, et l'on compare une page à trois autres, pas deux groupes tirés au sort — le protocole est le livrable.
 
 ## Limite assumée
 
@@ -91,7 +109,12 @@ python -m geotracker.run --client smart-bpjeps
 # Lire les résultats
 python -m geotracker.report            # dernier run vs précédent
 python -m geotracker.report --serie    # la courbe
+
+# Importer les idées de requêtes proposées depuis le dashboard
+python -m geotracker.carnet ~/Downloads/propositions-requetes.json
 ```
+
+Le dashboard s'ouvre en `file://` et ne peut pas écrire sur le disque : les idées de requêtes s'y téléchargent en un fichier, que cette commande importe dans le YAML au statut « observation » — collectées dès le lundi suivant, hors taux global le temps de les valider. La commande propose elle-même le commit et le push : la collecte lit le dépôt.
 
 ## Règles à ne pas casser
 
