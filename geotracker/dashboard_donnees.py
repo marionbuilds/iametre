@@ -24,7 +24,7 @@ import math
 from urllib.parse import urlparse
 
 from .config import load_client, load_produit
-from .format import nb
+from .format import nb, points
 from .report import collecte_comparable, couverture, run_summary, serie_commune, taux_commun
 
 SEUIL_TROU = 25.0
@@ -414,10 +414,10 @@ def _lecture_moteur(m: dict, tous: list[dict]) -> str:
             return f"{base}, mais c'est là que la marque est citée le plus bas."
         return f"{base}."
     if m["rang"] and rangs and m["rang"] <= min(rangs):
-        return "Le plus dur à percer, mais la meilleure place quand la marque y est."
+        return "Le plus dur à percer, mais la meilleure place quand elle apparaît."
     if m["taux"] <= pire:
         return "Le plus difficile à percer."
-    return f"Bien placée quand la marque y est, rang {nb(m['rang'])}." if m["rang"] else ""
+    return f"Bien placée quand elle apparaît : rang moyen {nb(m['rang'])}." if m["rang"] else ""
 
 
 def _diagnostic(q: dict) -> str:
@@ -544,15 +544,15 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
     elif abs(d["delta"]) <= marge_cmp:
         # Dans la marge de fluctuation : ni victoire ni alerte, on le DIT.
         badge = {"variante": "stable", "delta": d["delta"]}
-        phrase = (f"Variation de {nb(abs(d['delta']))} pt(s) : dans la marge de fluctuation "
-                  f"normale (±{nb(marge_cmp)} pts), ce n'est ni une progression ni un recul."
-                  + note_perim)
+        phrase = (f"Variation de {nb(abs(d['delta']))} {points(d['delta'])} : dans la marge "
+                  f"de fluctuation normale (±{nb(marge_cmp)} pts), ce n'est ni une "
+                  f"progression ni un recul." + note_perim)
     else:
         haut = d["delta"] >= 0
         badge = {"variante": "hausse" if haut else "baisse", "delta": d["delta"]}
-        phrase = (f"{'▲' if haut else '▼'} {nb(abs(d['delta']))} points depuis la collecte "
-                  f"précédente, au-delà de la marge de ±{nb(marge_cmp)} pts : le mouvement "
-                  f"est réel." + note_perim)
+        phrase = (f"{'▲' if haut else '▼'} {nb(abs(d['delta']))} {points(d['delta'])} depuis "
+                  f"la collecte précédente, au-delà de la marge de ±{nb(marge_cmp)} pts : "
+                  f"le mouvement est réel." + note_perim)
 
     # Santé de la collecte. Un moteur qui tombe ne fait PAS échouer le job : il
     # est sauté proprement et creuse un trou muet dans la série. Le seul

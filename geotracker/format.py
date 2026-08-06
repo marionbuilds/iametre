@@ -13,3 +13,11 @@ def nb(x, dec: int = 1) -> str:
     """Nombre à la française : virgule décimale. « 10.6 » est une faute en
     français, et ça saute aux yeux sur un produit qui vise ce marché."""
     return f"{x:.{dec}f}".replace(".", ",")
+
+
+def points(x) -> str:
+    """Accord de « point » en PROSE : singulier sous 2 (« 0,8 point »),
+    pluriel au-delà (« 6,1 points »). Règle transverse validée le 06/08 :
+    les contextes compacts et chiffrés (badge, règle graduée, marges
+    « ±6,9 pts ») gardent l'abréviation invariable « pts »."""
+    return "point" if abs(x) < 2 else "points"

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import html
 
-from .format import nb as _nb
+from .format import nb as _nb, points as _points
 
 
 def _cite(texte: str) -> str:
@@ -615,9 +615,9 @@ def _hero(h: dict) -> str:
     s = h["sante"]
     classe = {"ok": " health--ok", "partielle": "", "muette": " health--bad"}[s["variante"]]
     sante_html = f'<p class="health{classe}">{s["texte"]}</p>'
-    reste_txt = f"<strong>+{reste:.0f} pts restants</strong>"
+    reste_txt = f"<strong>+{reste:.0f} pts</strong>"
     if h["contenus"]:
-        reste_txt += f" · <strong>{h['contenus']} à {h['contenus'] + 1} contenus</strong>"
+        reste_txt += f" · <strong>{h['contenus']} à {h['contenus'] + 1} contenus à créer</strong>"
     return f"""  <section class="hero">
     <div class="gauge">
       <svg viewBox="0 0 210 130" aria-hidden="true">
@@ -635,7 +635,7 @@ def _hero(h: dict) -> str:
       <h2>{h["titre"]}{badge}</h2>
       <p class="eyebrow">Visibilité IA</p>
       <p>Mesuré sur <strong>{h["appels_reussis"]} appels réussis</strong>, {h["n_moteurs"]} moteurs
-      avec recherche web ; la mémoire de marque est suivie à part, hors de ce taux. {_e(h["phrase"])}</p>
+      avec recherche web ; la mémoire de marque (moteur sans recherche) est suivie à part, hors de ce taux. {_e(h["phrase"])}</p>
       {sante_html}
     </div>
     <div class="ruler">
@@ -664,7 +664,7 @@ def _moteurs(moteurs: list) -> str:
         appels = f'{a["ok"]} appels'
         if a["en_erreur"]:
             appels = (f'<span class="eng__warn">{a["ok"]}/{a["total"]} appels, '
-                      f'{a["erreurs"]} échec(s)</span>')
+                      f'{a["erreurs"]} échec{"s" if a["erreurs"] > 1 else ""}</span>')
         eng += (f'<article class="eng{" eng--zero" if m["est_zero"] else ""}">'
                 f'<h3>{_e(m["nom"])}</h3>'
                 f'<div class="eng__rate">{m["taux"]:.0f} %</div>'
@@ -708,7 +708,7 @@ def _a_faire(af: dict) -> str:
         f'<article class="queue__card"><div class="queue__txt">'
         f'<span class="queue__rank">Article n°{q["numero"]}</span>'
         f'<h3>{_cite(q["question"])}</h3><p>{_e(q["diagnostic"])} '
-        f'<strong>{_e(q["impact"])}</strong> sur le taux global.</p>'
+        f'Gain estimé : <strong>{_e(q["impact"])}</strong> sur le taux global.</p>'
         f'<button class="btn--mini" data-copy="{_e(q["recette"])}" '
         f'data-ok="Recette copiée">Copier la recette d\'article</button></div>'
         f'<div class="queue__rate{" queue__rate--warn" if q["taux_warn"] else ""}">'
@@ -720,7 +720,7 @@ def _a_faire(af: dict) -> str:
     return f"""
   <section class="card">
     <div class="card__head"><h2>À faire</h2>
-      <span class="card__hint">classées par impact sur le taux global</span></div>
+      <span class="card__hint">classés par gain estimé sur le taux global</span></div>
 {tete}
     {queue}
   </section>"""
@@ -730,7 +730,7 @@ def _voix(v: dict) -> str:
     lead = v["lead"]
     lead_voix = (
         f"La marque domine, mais <strong>{_e(lead['poursuivant'])} n'est "
-        f"qu'à {_nb(lead['ecart'])} pts</strong>."
+        f"qu'à {_nb(lead['ecart'])} {_points(lead['ecart'])}</strong>."
         if lead["variante"] == "domine"
         else "Répartition des citations relevées pendant la collecte."
     )
@@ -751,8 +751,8 @@ def _voix(v: dict) -> str:
         cls = "is-you" if ligne["est_moi"] else ("is-chaser" if ligne["est_poursuivant"] else "")
         ecart = ""
         if ligne["ecart"] is not None:
-            ecart = (f'<span class="lb__gap">à {_nb(ligne["ecart"])} pts '
-                     f'derrière la marque</span>')
+            ecart = (f'<span class="lb__gap">à {_nb(ligne["ecart"])} '
+                     f'{_points(ligne["ecart"])} derrière la marque</span>')
         lb += (f'<li class="{cls}"><span class="lb__rank">{ligne["rang"]}</span>'
                f'<span class="lb__dom">{_e(ligne["domaine"])}'
                + (f"<small>{_e(ligne['sous_titre'])}</small>" if ligne["sous_titre"] else "")
@@ -770,7 +770,7 @@ def _voix(v: dict) -> str:
 def _forteresses(f: dict) -> str:
     lead = (
         f"<strong>{_e(f['lead']['texte_requete'])}</strong> à {f['lead']['taux']:.0f} % : la preuve que la "
-        f"méthode fonctionne. Il suffit de la répliquer sur les sujets ci-dessus."
+        f"méthode fonctionne. Il suffit de la répliquer sur les sujets de la carte « À faire »."
         if f["lead"]["variante"] == "exemples"
         else "Aucune requête au-dessus de 60 % pour l'instant."
     )
@@ -838,12 +838,10 @@ def _courbe(c: dict) -> str:
         return f"""<section class="card">
   <div class="card__head"><h2>Courbe de visibilité</h2>
     <span class="card__hint">un point par jour de collecte</span></div>
-  <p class="card__lead">La courbe se dessine à partir de la deuxième collecte, qui arrive
-  automatiquement. En attendant, le repère qui compte :
-  <strong>la marge de fluctuation de cette mesure est de ±{_nb(marge)} pts.</strong>
-  Une réponse d'IA n'est pas stable : à effort constant, le taux oscille naturellement dans
-  cette bande. Une variation qui reste dedans n'est ni une victoire ni une alerte ; seuls un
-  mouvement qui en sort ou une tendance sur 3-4 collectes sont de vrais signaux.</p>
+  <p class="card__lead">La courbe apparaîtra à la deuxième collecte, automatique. D'ici là,
+  le repère qui compte : <strong>±{_nb(marge)} pts de marge de fluctuation.</strong>
+  Une réponse d'IA oscille naturellement dans cette bande ; seul un mouvement qui en sort,
+  ou une tendance sur 3-4 collectes, est un vrai signal.</p>
 </section>"""
 
     serie = c["points"]
@@ -876,7 +874,7 @@ def _courbe(c: dict) -> str:
 
     return f"""<section class="card">
   <div class="card__head"><h2>Courbe de visibilité</h2>
-    <span class="card__hint">périmètre constant : {n_mot} moteurs communs ·
+    <span class="card__hint">comparé sur les {n_mot} moteurs communs à toutes les collectes ·
     bande grisée : marge de fluctuation ±{_nb(marge)} pts</span></div>
   <p class="card__lead">Tant que la ligne reste dans sa bande, la mesure est <strong>stable</strong> :
   l'oscillation est le comportement normal d'une réponse d'IA, pas un recul.
@@ -921,8 +919,11 @@ def _matrice(mx: dict) -> str:
         lead += (f"<strong>{_e(mh['nom'])}</strong> "
                  f"place la marque le plus haut quand il la cite (rang "
                  f"{_nb(mh['rang'])}). ")
-    if mx["lead"]["muettes"]:
-        lead += (f"<strong>{mx['lead']['muettes']} requête(s)</strong> ne sortent chez aucun moteur : "
+    if mx["lead"]["muettes"] == 1:
+        lead += ("<strong>1 requête</strong> ne sort chez aucun moteur : c'est le trou "
+                 "à combler en premier, un contenu la débloque partout à la fois.")
+    elif mx["lead"]["muettes"]:
+        lead += (f"<strong>{mx['lead']['muettes']} requêtes</strong> ne sortent chez aucun moteur : "
                  f"ce sont les trous à combler en premier, un contenu les débloque "
                  f"partout à la fois.")
     else:
@@ -931,7 +932,7 @@ def _matrice(mx: dict) -> str:
     return f"""
   <section class="card">
     <div class="card__head"><h2>Quel moteur te cite, sur quel sujet</h2>
-      <span class="card__hint">réponses qui citent la marque, sur le nombre d'appels</span></div>
+      <span class="card__hint">citations / appels, par moteur et par requête</span></div>
     <p class="card__lead">{lead}</p>
     <div class="mx"><table class="mx__t">
       <thead><tr><th class="mx__q">Requête</th>{entetes}</tr></thead>
@@ -955,15 +956,16 @@ def _alignement(al: dict) -> str:
             for q in p["detail"]
         )
         if p["reste"] > 0:
-            qs += f'<span class="al__q"><span>+ {p["reste"]} autre(s) requête(s)</span></span>'
+            s = "s" if p["reste"] > 1 else ""
+            qs += f'<span class="al__q"><span>+ {p["reste"]} autre{s} requête{s}</span></span>'
         flag = ""
         if p["flag"] is not None and p["flag"]["variante"] == "accueil":
             flag = (f'<span class="al__flag">l\'accueil répond à {p["flag"]["n"]} questions '
-                    f'précises : autant de pages dédiées qui manquent</span>')
+                    f'précises : autant de pages dédiées à créer</span>')
         elif p["flag"] is not None:
             flag = (f'<span class="al__flag">cette page absorbe {p["flag"]["n"]} sujets '
-                    f'différents : vérifier qu\'elle répond vraiment à chacun, sinon les '
-                    f'pages dédiées manquent</span>')
+                    f'différents : vérifie qu\'elle répond vraiment à chacun, sinon il te '
+                    f'manque des pages dédiées</span>')
         rows += (f'<div class="al__row"><div class="al__head">'
                  f'<span class="al__url">{_e(p["page"])}</span>'
                  f'<span class="al__n">{p["n"]} citations · {p["requetes"]} requêtes</span>'
@@ -1048,8 +1050,8 @@ def _vue_requetes(j: dict) -> str:
       ≈ +{len(obs['lignes'])}&nbsp;$/mois · hors taux global</span></div>
     <p class="card__lead">Ces requêtes sont collectées et mesurées, mais n'entrent ni dans le
     taux global ni dans le périmètre de comparaison : on peut les <strong>tester sans faire
-    bouger la série</strong>. Bonnes sur 2-3 collectes, elles sont promues titulaires (dans
-    le YAML, en retirant leur ligne <code>statut</code>).</p>
+    bouger la série</strong>. Bonnes sur 2-3 collectes, elles sont promues titulaires, c'est-à-dire
+    comptées dans le taux global (dans le YAML, en retirant leur ligne <code>statut</code>).</p>
     <div class="tw"><table class="d">
     <tr><th>Requête</th><th>Réf.</th><th>Citation</th><th>Ratio</th></tr>
     {lignes_obs}</table></div>
@@ -1067,7 +1069,7 @@ def _vue_requetes(j: dict) -> str:
     <input id="req-champ" type="text" maxlength="180"
            placeholder="Proposer une requête, formulée comme on la poserait à une IA…"
            aria-label="Nouvelle requête à suivre">
-    <button class="btn--report" id="req-valider">Valider</button>
+    <button class="btn--report" id="req-valider">Ajouter au carnet</button>
   </div>
   <p class="req-erreur" id="req-erreur" role="alert" hidden></p>
   <div class="reqattente" id="req-attente" hidden>
