@@ -54,7 +54,23 @@ m3, s3 = analyse(r3, cfg)
 assert m3["cited"] is False and s3 == [] and r3.raw == {"x": 1}
 print("OK  erreur moteur non bloquante, brut conserve")
 
-# 6. le JavaScript de l'interface est syntaxiquement valide
+# 6. extraction d'attributs : co-presence marque + attribut dans une phrase
+from geotracker.attributs import attributs_dans
+
+trouves, exemples = attributs_dans(
+    "Maison Dupont fabrique des tables en chêne sur mesure. "
+    "L'atelier de Lyon est reputé. Le bois massif vieillit bien.",
+    cfg.brand_terms, cfg.attributs,
+)
+# « chêne » et « sur mesure » sont dans LA phrase de la marque ; « atelier »
+# et « bois massif » sont dans d'autres phrases : ils ne comptent pas.
+assert trouves == {"bois-massif", "sur-mesure"}, trouves
+assert "chêne" in exemples["bois-massif"]
+t2, _ = attributs_dans("L'atelier travaille le chêne.", cfg.brand_terms, cfg.attributs)
+assert t2 == set(), t2
+print("OK  attributs : co-presence par phrase, pas de comptage hors marque")
+
+# 7. le JavaScript de l'interface est syntaxiquement valide
 #
 # Panne reelle du 29/07 au 05/08/2026 : la constante JS n'etait pas une chaine
 # brute, Python a converti un « \n » du JavaScript en vrai retour a la ligne,
@@ -74,4 +90,4 @@ if shutil.which("node"):
 else:
     print("--  javascript non verifie (node absent)")
 
-print("\n6/6 tests passes")
+print("\n7/7 tests passes")

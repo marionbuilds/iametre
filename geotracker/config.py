@@ -69,6 +69,11 @@ class ClientConfig:
     repetitions_ai_overview: int
     # LE concurrent direct à battre : alimente la vue « Duel » du dashboard.
     rival: str | None = None
+    # Attributs de marque (chantier b, 06/08/2026) : ce que les modèles
+    # associent à la marque. Liste de {id, label, termes}.
+    attributs: list = field(default_factory=list)
+    # Expérience contrôlée (chantier a) : bloc figé du YAML, tel quel.
+    experience: dict | None = None
     path: Path = field(default=None, repr=False)
 
     def competitor_label(self, domain: str) -> str | None:
@@ -134,6 +139,8 @@ def load_client(name: str) -> ClientConfig:
         competitors=raw.get("competitors", []),
         prompts=prompts,
         rival=raw.get("rival"),
+        attributs=raw.get("attributs", []),
+        experience=raw.get("experience"),
         engines=engines,
         repetitions=int(sampling.get("repetitions", 5)),
         repetitions_ai_overview=int(sampling.get("repetitions_ai_overview", 3)),

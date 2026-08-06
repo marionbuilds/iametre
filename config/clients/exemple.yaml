@@ -47,6 +47,20 @@ prompts:
     text: "Quel budget prévoir pour une bibliothèque sur mesure ?"
     type: informationnelle
 
+# Attributs de marque : ce que les modèles associent à la marque quand ils en
+# parlent (compté par co-présence dans une même phrase). Extraction pure,
+# rejouable sur le brut sans aucune collecte.
+attributs:
+  - id: bois-massif
+    label: "Le bois massif"
+    termes: ["chêne", "bois massif"]
+  - id: sur-mesure
+    label: "Le sur-mesure"
+    termes: ["sur mesure"]
+  - id: artisan
+    label: "L'atelier artisanal"
+    termes: ["artisan", "atelier"]
+
 # Échantillonnage. Une réponse de LLM est non déterministe : on ne constate
 # pas, on échantillonne.
 sampling:
