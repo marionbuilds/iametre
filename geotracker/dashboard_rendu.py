@@ -132,11 +132,14 @@ body{font-family:var(--f-body); background:var(--bg); color:var(--ink); line-hei
   font-size:1rem; line-height:1; padding:2px}
 a.btn--mini{text-decoration:none; display:inline-block; margin-top:0}
 .duel{display:grid}
-.duel__row{display:grid; grid-template-columns:minmax(0,1fr) 250px; gap:16px; align-items:center;
-  padding:11px 0; border-bottom:1px solid var(--line)}
+/* Finition 06/08 : colonne question FIXE (mêmes départs de barres sur toutes
+   les lignes) et barres flexibles qui démarrent juste après le texte au lieu
+   d'être rejetées au bord droit. Interligne resserré. */
+.duel__row{display:grid; grid-template-columns:420px minmax(0,1fr); gap:24px; align-items:center;
+  padding:7px 0; border-bottom:1px solid var(--line)}
 .duel__row:last-child{border-bottom:none}
 .duel__row>p{font-size:.87rem; font-weight:600}
-.duel__bars{display:grid; gap:5px}
+.duel__bars{display:grid; gap:4px}
 .duel__bar{display:flex; align-items:center; gap:8px}
 .duel__bar small{font-size:.64rem; font-weight:700; text-transform:uppercase;
   letter-spacing:.06em; color:var(--ink-faint); width:26px; flex:none}
@@ -154,9 +157,13 @@ button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-fore
 .chip:focus-visible{outline:3px solid var(--data-deep); outline-offset:2px}
 .print-head{display:none}
 
+/* Finition 06/08 : deux colonnes seulement (la 3e, vidée de ses stats,
+   laissait la jauge isolée dans le vide), et la règle graduée devient une
+   RANGÉE du bloc (grid-column:1/-1) au lieu de flotter sous le texte. */
 .hero{background:var(--paper); border:1px solid var(--line); border-radius:22px;
-  padding:30px 32px; display:grid; grid-template-columns:auto 1fr auto; gap:36px;
+  padding:28px 32px; display:grid; grid-template-columns:auto 1fr; gap:6px 30px;
   align-items:center; margin-bottom:18px}
+.hero > .ruler{grid-column:1/-1; margin-top:14px}
 .gauge{position:relative; width:210px}
 .gauge svg{display:block; width:100%; height:auto}
 .gauge__value{position:absolute; left:0; right:0; top:58%; text-align:center;
@@ -268,14 +275,16 @@ button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-fore
 .card__lead strong{color:var(--ink)}
 
 .lb{list-style:none}
-.lb li{display:grid; grid-template-columns:26px 1fr auto auto; gap:12px; align-items:center;
-  padding:11px 10px; border-radius:12px; font-size:.9rem; border-bottom:1px solid var(--line)}
+/* Finition 06/08 : le domaine sur colonne fixe, la barre prend l'espace
+   restant juste après lui au lieu d'un petit trait collé au bord droit. */
+.lb li{display:grid; grid-template-columns:26px 280px 1fr 58px; gap:12px; align-items:center;
+  padding:9px 10px; border-radius:12px; font-size:.9rem; border-bottom:1px solid var(--line)}
 .lb li:last-child{border-bottom:none}
 .lb__rank{font-family:var(--f-mono); font-weight:600; font-size:.8rem; color:var(--ink-faint)}
 .lb__dom{font-weight:600; overflow-wrap:anywhere}
 .lb__dom small{display:block; font-weight:500; font-size:.74rem; color:var(--ink-soft)}
-.lb__part{font-family:var(--f-mono); font-weight:700}
-.lb__bar{width:88px; height:7px; border-radius:99px; background:var(--piste); overflow:hidden}
+.lb__part{font-family:var(--f-mono); font-weight:700; text-align:right}
+.lb__bar{width:auto; height:7px; border-radius:99px; background:var(--piste); overflow:hidden}
 .lb__bar i{display:block; height:100%; border-radius:99px; background:var(--ink-faint)}
 .lb li.is-you{background:var(--data-soft); border-bottom-color:transparent}
 .lb li.is-you .lb__dom{color:var(--data-deep)}
@@ -386,6 +395,7 @@ table.d tr:last-child td{border-bottom:none}
   .mission{grid-template-columns:1fr}
   .mission__side{justify-items:start; text-align:left}
   .mission__acts{justify-content:flex-start}
+  .duel__row{grid-template-columns:1fr; gap:8px}
 }
 @media(max-width:560px){
   .app{padding:10px}
@@ -585,15 +595,15 @@ def _hero(h: dict) -> str:
       <p>Mesuré sur <strong>{h["appels_reussis"]} appels réussis</strong>, {h["n_moteurs"]} moteurs
       avec recherche web ; la mémoire de marque est suivie à part, hors de ce taux. {_e(h["phrase"])}</p>
       {sante_html}
-      <div class="ruler">
-        <div class="ruler__track">
-          <span class="ruler__ticks"></span>
-          <span class="ruler__fill" style="width:{taux:.0f}%"></span>
-          <span class="ruler__goal" style="left:{palier}%"><span>Palier {palier} %</span></span>
-        </div>
-        <div class="ruler__caption">
-          <span><strong>{taux:.0f} %</strong> aujourd'hui</span><span>{reste_txt}</span>
-        </div>
+    </div>
+    <div class="ruler">
+      <div class="ruler__track">
+        <span class="ruler__ticks"></span>
+        <span class="ruler__fill" style="width:{taux:.0f}%"></span>
+        <span class="ruler__goal" style="left:{palier}%"><span>Palier {palier} %</span></span>
+      </div>
+      <div class="ruler__caption">
+        <span><strong>{taux:.0f} %</strong> aujourd'hui</span><span>{reste_txt}</span>
       </div>
     </div>
   </section>"""
@@ -795,7 +805,9 @@ def _courbe(c: dict) -> str:
 </section>"""
 
     serie = c["points"]
-    W, H, PAD = 640, 150, 16
+    # Finition 06/08 : carte moins haute (150 -> 112, surdimensionnée pour
+    # une série courte), étiquette rapprochée du dernier point (-12 -> -7).
+    W, H, PAD = 640, 112, 16
     n = len(serie)
     xs = [PAD + i * (W - 2 * PAD) / (n - 1) for i in range(n)]
 
@@ -817,7 +829,7 @@ def _courbe(c: dict) -> str:
     # courte de l'en-tête suffit, pas de phrase d'explication en plus.
     n_mot = c["n_moteurs"]
     dernier = serie[-1]
-    etiquette = (f'<text x="{xs[-1]:.1f}" y="{y(dernier["taux"]) - 12:.1f}" text-anchor="end" '
+    etiquette = (f'<text x="{xs[-1]:.1f}" y="{y(dernier["taux"]) - 7:.1f}" text-anchor="end" '
                  f'class="curve__val">{dernier["taux"]:.0f} % · {n_mot} moteurs</text>')
 
     return f"""<section class="card">
@@ -1036,13 +1048,13 @@ def rendu(d: dict) -> str:
         <path d="M2 6.4 H14 M6.4 6.4 V14" stroke="currentColor" stroke-width="1.4"/>
         <rect x="8.4" y="8.4" width="3.6" height="3.2" rx="1" fill="currentColor"/></svg><span>Moteurs et sujets</span></button>
     <button class="nav" role="tab" aria-selected="false" aria-controls="v-cit"
-            title="Ce que les IA citent chez toi" aria-label="Ce que les IA citent chez toi">
+            title="Pages citées" aria-label="Pages citées">
       <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
         <path d="M6.6 9.4 L9.4 6.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
         <path d="M7.8 4.6 L9.2 3.2 a2.6 2.6 0 0 1 3.6 3.6 L11.4 8.2" stroke="currentColor"
               stroke-width="1.6" stroke-linecap="round" fill="none"/>
         <path d="M8.2 11.4 L6.8 12.8 a2.6 2.6 0 0 1 -3.6 -3.6 L4.6 7.8" stroke="currentColor"
-              stroke-width="1.6" stroke-linecap="round" fill="none"/></svg><span>Ce que les IA citent chez toi</span></button>
+              stroke-width="1.6" stroke-linecap="round" fill="none"/></svg><span>Pages citées</span></button>
     <button class="nav" role="tab" aria-selected="false" aria-controls="v-req"
             title="Requêtes" aria-label="Requêtes">
       <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
