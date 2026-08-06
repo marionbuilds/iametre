@@ -74,10 +74,8 @@ body{font-family:var(--f-body); background:var(--bg); color:var(--ink); line-hei
 
 .side{flex:none; width:188px; position:sticky; top:16px; height:calc(100vh - 32px);
   min-height:480px; background:var(--forest); color:var(--sur-forest); border-radius:26px;
-  padding:16px 10px 18px; display:flex; flex-direction:column; align-items:center; gap:8px}
-.brand{margin-bottom:16px}
-.brand__mark{width:44px; height:44px; border-radius:14px; background:rgba(239,246,232,.14);
-  display:grid; place-items:center}
+  padding:16px 10px 18px; display:flex; flex-direction:column; align-items:center; gap:8px;
+  overflow-y:auto}
 /* Passe 1 : le libellé de vue est VISIBLE à côté de l'icône (avant, les noms
    de vues n'existaient qu'en title/aria-label, donc invisibles). */
 .nav{display:flex; align-items:center; gap:9px; width:100%; min-height:44px; border:none;
@@ -88,8 +86,7 @@ body{font-family:var(--f-body); background:var(--bg); color:var(--ink); line-hei
 .nav[aria-selected="true"]{background:var(--forest-2); color:var(--sur-forest)}
 @media(hover:hover){.nav:hover{color:var(--sur-forest)}}
 .nav:focus-visible{outline:3px solid var(--lime); outline-offset:2px}
-.side__sep{flex:1}
-.side__client{width:38px; height:38px; border-radius:50%; background:var(--lime);
+.side__client{width:38px; height:38px; border-radius:50%; background:var(--lime); margin-bottom:16px; flex:none;
   color:#1D3826; display:grid; place-items:center; font-weight:800; font-size:.95rem}
 
 .main{flex:1; min-width:0; padding:6px 2px 60px}
@@ -389,9 +386,7 @@ table.d tr:last-child td{border-bottom:none}
   .app{flex-direction:column; gap:14px}
   .side{position:static; width:100%; height:auto; min-height:0; flex-direction:row;
     border-radius:18px; padding:10px 14px}
-  .brand{margin-bottom:0}
-  .side__sep{display:none}
-  .side__client{margin-left:auto}
+  .side__client{margin-bottom:0}
   .hero{grid-template-columns:1fr; text-align:center}
   .gauge{margin:0 auto}
   .hero__side{grid-template-columns:repeat(3,1fr); min-width:0}
@@ -811,9 +806,9 @@ def _courbe(c: dict) -> str:
 </section>"""
 
     serie = c["points"]
-    # Finition 06/08 : carte moins haute (150 -> 112, surdimensionnée pour
-    # une série courte), étiquette rapprochée du dernier point (-12 -> -7).
-    W, H, PAD = 640, 112, 16
+    # Finition 06/08 : hauteur ajustée au contenu réel (150 -> 112 -> 80,
+    # le tiers inférieur restait vide), étiquette collée au point (-7).
+    W, H, PAD = 640, 80, 16
     n = len(serie)
     xs = [PAD + i * (W - 2 * PAD) / (n - 1) for i in range(n)]
 
@@ -1033,13 +1028,7 @@ def rendu(d: dict) -> str:
     m = d["meta"]
     return f"""<div class="app">
   <aside class="side">
-    <div class="brand" title="{_e(m['produit_nom'])} · {_e(m['produit_signature'])}">
-      <div class="brand__mark" aria-hidden="true">
-        <svg width="24" height="24" viewBox="0 0 20 20" fill="none">
-          <path d="M2 15 L2 11 M5.2 15 L5.2 8 M8.4 15 L8.4 11 M11.6 15 L11.6 5 M14.8 15 L14.8 11 M18 15 L18 8"
-                stroke="#EFF6E8" stroke-width="1.8" stroke-linecap="round"/></svg>
-      </div>
-    </div>
+    <div class="side__client" title="{_e(m['client_label'])}">{_e(m['client_initiale'])}</div>
     <button class="nav" role="tab" aria-selected="true" aria-controls="v-ens"
             title="Vue d'ensemble" aria-label="Vue d'ensemble">
       <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -1076,8 +1065,6 @@ def rendu(d: dict) -> str:
         <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.7"/>
         <path d="M8 4.5 L8 8 L10.6 9.6" stroke="currentColor" stroke-width="1.7"
               stroke-linecap="round"/></svg><span>Collectes</span></button>
-    <div class="side__sep"></div>
-    <div class="side__client" title="{_e(m['client_label'])}">{_e(m['client_initiale'])}</div>
   </aside>
   <main class="main">
     <div class="print-head"><strong>{_e(m['produit_nom'])} · {_e(m['client_label'])}</strong>
