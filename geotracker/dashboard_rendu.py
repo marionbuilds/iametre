@@ -93,6 +93,12 @@ body{font-family:var(--f-body); background:var(--bg); color:var(--ink); line-hei
   color:#1D3826; display:grid; place-items:center; font-weight:800; font-size:.95rem}
 
 .main{flex:1; min-width:0; padding:6px 2px 60px}
+/* Finition 06/08 : UN seul écart vertical entre les sections d'une vue,
+   porté par le panneau. Avant, .hero/.engines/.grid portaient 18px chacun
+   mais .card ne portait RIEN : le rythme alternait large/collé selon la
+   nature de la section. Plus aucune section ne porte de marge externe. */
+[role="tabpanel"]>*{margin:0 0 18px}
+[role="tabpanel"]>*:last-child{margin-bottom:0}
 .mhead{display:flex; align-items:flex-start; justify-content:space-between; gap:16px;
   flex-wrap:wrap; margin-bottom:20px}
 .mhead h1{font-family:var(--f-display); font-weight:700; font-size:1.5rem;
@@ -162,7 +168,7 @@ button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-fore
    RANGÉE du bloc (grid-column:1/-1) au lieu de flotter sous le texte. */
 .hero{background:var(--paper); border:1px solid var(--line); border-radius:22px;
   padding:28px 32px; display:grid; grid-template-columns:auto 1fr; gap:6px 30px;
-  align-items:center; margin-bottom:18px}
+  align-items:center}
 .hero > .ruler{grid-column:1/-1; margin-top:14px}
 .gauge{position:relative; width:210px}
 .gauge svg{display:block; width:100%; height:auto}
@@ -213,7 +219,7 @@ button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-fore
 .grid.grid--pleine{grid-template-columns:1fr}
 
 .mission{border-radius:22px; background:var(--forest); color:var(--sur-forest);
-  padding:26px 30px; margin-bottom:18px; display:grid; grid-template-columns:1fr auto;
+  padding:26px 30px; display:grid; grid-template-columns:1fr auto;
   gap:24px; align-items:center}
 .mission__eyebrow{display:flex; align-items:center; gap:8px; font-size:.72rem; font-weight:700;
   text-transform:uppercase; letter-spacing:.12em; color:var(--lime); margin-bottom:8px}
@@ -262,7 +268,7 @@ button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-fore
 
 /* align-items:start : une carte courte garde sa hauteur au lieu de s'étirer
    et de laisser un grand vide blanc à côté d'une carte longue. */
-.grid{display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:18px;
+.grid{display:grid; grid-template-columns:1fr 1fr; gap:18px;
   align-items:start}
 .card{background:var(--paper); border:1px solid var(--line); border-radius:22px;
   padding:24px 26px}
@@ -302,7 +308,7 @@ button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-fore
 .st__bar i{display:block; height:100%; border-radius:99px; background:var(--data)}
 
 .engines{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
-  gap:14px; margin-bottom:18px}
+  gap:14px}
 .eng{background:var(--paper); border:1px solid var(--line); border-radius:var(--r);
   padding:18px 20px}
 .eng h3{font-size:.9rem; font-weight:700; margin-bottom:2px}
