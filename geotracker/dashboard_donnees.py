@@ -376,6 +376,11 @@ def _promesse(imp: float) -> str:
 
 def _objectif(taux: float) -> tuple[int, float]:
     palier = min(100, (int(taux // 10) + 1) * 10)
+    # À moins d'un demi-point du palier, l'affichage arrondi dirait
+    # « Palier 60 % · +0 pts restants » : on vise directement le suivant
+    # (validé par Marion le 06/08/2026).
+    if palier - taux < 0.5 and palier < 100:
+        palier = min(100, palier + 10)
     return palier, palier - taux
 
 
