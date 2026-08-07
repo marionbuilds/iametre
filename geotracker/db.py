@@ -89,7 +89,27 @@ def connect(path: Path | str = DEFAULT_DB) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
-    conn.executescript(SCHEMA)
+    # Une base illisible mérite un message qui dit QUOI FAIRE, pas un
+    # traceback nu (passe 7, 08/08/2026 — les deux « plantes bruyants »).
+    # Le schéma est la première requête : c'est ici que ça casse.
+    try:
+        conn.executescript(SCHEMA)
+    except sqlite3.OperationalError as exc:
+        if "locked" in str(exc):
+            raise SystemExit(
+                f"La base {path} est verrouillée : un autre processus l'utilise "
+                f"(une collecte en cours ?). Attends qu'il finisse ou ferme-le, "
+                f"puis relance. Rien n'a été perdu ni modifié."
+            ) from exc
+        raise
+    except sqlite3.DatabaseError as exc:
+        raise SystemExit(
+            f"La base {path} est corrompue ou n'est pas une base SQLite "
+            f"({exc}). Elle est versionnée à chaque collecte : "
+            f"`git checkout HEAD -- data/runs.sqlite3` restaure le dernier "
+            f"état poussé (ou un commit antérieur si besoin). Les collectes "
+            f"faites depuis ce commit sont les seules pertes possibles."
+        ) from exc
     return conn
 
 

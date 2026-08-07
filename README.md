@@ -55,14 +55,32 @@ Deux limites, assumées : le découpage de phrases est fruste (dans les listes �
 
 Un point de méthode qui compte : cette métrique a été écrite le 6 août et s'est calculée sur les collectes du 28 juillet. C'est ce que permet la conservation du brut : les agrégats se recalculent, y compris ceux qui n'existaient pas encore au moment de la collecte.
 
-## Les trois garde-fous
+## L'exactitude des faits : est-ce que le modèle dit juste ?
+
+Sur une question comme « quel diplôme remplace celui-ci ? », la citation n'est pas la bonne métrique : ce qui compte est la justesse de la réponse. Un fait vérifiable se déclare dans le YAML du client — les requêtes où il est attendu, les termes qui prouvent la bonne réponse, les erreurs déjà observées dans le brut — et chaque réponse reçoit un verdict : **juste**, **faux**, ou **muet**.
+
+```bash
+python -m geotracker.faits              # rejoué sur tout l'historique
+```
+
+Quatre limites, avant tout résultat. Un fait n'est cherché que dans les requêtes où on l'attend, et **la liste des erreurs est construite par observation** : elle attrape ce qui a déjà été vu, pas ce qui pourrait l'être — les « faux » sont donc une borne basse. Une négation (« ce diplôme ne remplace pas… ») serait comptée juste, cas rare mais réel. Quand la bonne réponse et une erreur connue apparaissent dans la même réponse, **juste l'emporte** : une coquille d'acronyme à côté de l'information correcte n'est pas une erreur de fond. Enfin, croiser un verdict juste avec le fait d'être cité en source est une **co-occurrence, pas une attribution** : être cité dans une réponse juste ne prouve pas que le modèle tient l'information de vous.
+
+Deux règles de comptage héritées des attributs : jamais depuis une URL — un lien nommant la marque ne prouve pas que le modèle *dit* la bonne réponse —, et des bornes de mots strictes, pour qu'un sigle proche n'en valide pas un autre. Quand un terme de preuve est trop générique pour trancher seul, le fait déclare un contexte, et la preuve ne compte que dans une phrase qui le porte.
+
+Ce que ça donne, sur le suivi en cours : le moteur interrogé **sans recherche web** ne connaît aucun des faits déclarés — cohérent avec ce que mesure la « mémoire de marque », et c'est son prolongement : de « connaît-il la marque » à « connaît-il le domaine ».
+
+## Les cinq garde-fous
 
 **La marge de fluctuation.** Un taux de citation calculé sur un échantillon a une marge d'erreur. Elle est calculée à 95 % (`_marge()`, dans `dashboard_donnees.py`) et l'outil **refuse d'appeler « progression » un mouvement qui tient dedans** : il l'écrit à l'écran, en toutes lettres.
 
 > *« Variation de 5,2 pts : dans la marge de fluctuation normale (±6,7 pts), ce n'est ni une progression ni un recul. »*
 
 
-**La comparabilité de périmètre.** Deux collectes ne se comparent que si elles portent sur les **mêmes moteurs** et les **mêmes requêtes**. Quand ce n'est pas le cas, la collecte est écartée du calcul et le rapport le dit, plutôt que de produire un écart qui ne veut rien dire. Même logique pour les appels en échec : ils sont **exclus du taux** au lieu d'être comptés comme des non-citations, sinon une panne d'API ressemble à une chute de visibilité.
+**La comparabilité de périmètre.** Deux collectes ne se comparent que si elles portent sur les **mêmes moteurs** et les **mêmes requêtes**. Quand ce n'est pas le cas, la collecte est écartée du calcul et le rapport le dit, plutôt que de produire un écart qui ne veut rien dire.
+
+**Ce qui compte comme un appel mesuré.** Un appel n'entre dans le taux que s'il a produit une réponse : ni erreur, ni réponse vide. Une panne d'API comptée comme une non-citation ferait ressembler une panne à une chute de visibilité. Et une requête où Google n'affiche aucun AI Overview n'est pas une requête où la marque n'est pas citée : il n'y a pas eu de réponse où l'être — la faire compter reviendrait à mesurer un comportement de Google, pas une visibilité. Cette définition est écrite **à un seul endroit** (`EXPLOITABLE`, dans `db.py`) et interpolée par tous les calculs — rapport, tableau de bord, attributs, exactitude : aucun dénominateur ne peut diverger d'un autre. Corrigé le 8 août 2026, après qu'un banc d'essai sur données anormales a montré des réponses vides comptées comme des non-citations.
+
+**Une configuration incohérente ne produit rien.** Un fichier de suivi peut être valide en YAML et faux en pratique : un concurrent à suivre qui est en réalité le domaine mesuré (le duel se jouerait contre soi-même), une requête référencée dans un fait mais absente du jeu (une faute de frappe qui survivrait indéfiniment), un lexique vide qui resterait à zéro pour toujours. Ces cas sont vérifiés au chargement, et l'outil **s'arrête en listant les incohérences** au lieu de produire une page plausible et fausse.
 
 **L'évolution n'est pas une cause.** Depuis le 07/08/2026, tout le site est balisé en entités : la série mesure donc un **avant-après**, pas une expérience contrôlée (celle qui avait été montée a été close sans résultat, sa trace est dans le YAML). Un avant-après ne démontre aucune causalité : une hausse peut venir du balisage, mais aussi de la saisonnalité BPJEPS (rentrée) ou d'une mise à jour des modèles interrogés. L'outil suit une évolution, il ne prouve pas une cause, et tout ce qui en est présenté doit le dire.
 
@@ -108,6 +126,10 @@ python -m geotracker.run --client smart-bpjeps
 python -m geotracker.report            # dernier run vs précédent
 python -m geotracker.report --serie    # la courbe
 
+# Les deux extractions rejouables, sur tout l'historique
+python -m geotracker.attributs         # ce que les modèles associent à la marque
+python -m geotracker.faits             # est-ce qu'ils disent juste
+
 # Importer les idées de requêtes proposées depuis le dashboard
 python -m geotracker.carnet ~/Downloads/propositions-requetes.json
 ```
@@ -128,6 +150,7 @@ geotracker/engines/     un adaptateur par moteur, contrat commun, aucun ne casse
 geotracker/extract.py   les 3 extractions — pur, rejouable sur le brut déjà stocké
 geotracker/db.py        SQLite, commit par réponse
 geotracker/report.py    agrégation, aucun stockage
+geotracker/faits.py     exactitude des faits — pur, rejouable, comme extract.py
 data/runs.sqlite3       tout le brut, horodaté
 ```
 
@@ -138,5 +161,6 @@ Le schéma est multi-domaines dès le départ : un seul site suivi aujourd'hui, 
 - **Une réponse d'IA n'est pas une position Google.** Elle bouge d'un appel à l'autre, donc un « cité / pas cité » ponctuel ne dit rien. Tout le reste découle de là.
 - **Un écart n'est pas un résultat.** Tant qu'un mouvement tient dans la marge de fluctuation, ce n'est pas un mouvement. C'est la fonctionnalité que j'ai le plus retravaillée.
 - **Comparer deux collectes qui n'ont pas le même périmètre produit des chiffres flatteurs et faux.** D'où le garde-fou : mieux vaut ne rien afficher qu'afficher une progression inventée.
-- **Un appel qui échoue n'est pas une absence de citation.** Confondre les deux transforme une panne d'API en chute de visibilité.
+- **Un appel qui échoue n'est pas une absence de citation.** Confondre les deux transforme une panne d'API en chute de visibilité. Une réponse vide non plus : c'est la même erreur, en plus discret.
+- **Une définition dupliquée finit par diverger.** « Qu'est-ce qu'un appel qui compte » vivait dans quatorze requêtes SQL ; deux d'entre elles avaient déjà pris un autre sens. Une seule définition, interpolée partout, rend la divergence impossible plutôt qu'improbable.
 - **Interroger une API n'est pas interroger le produit grand public.** D'où le calibrage manuel mensuel, plutôt que de faire comme si l'écart n'existait pas.
