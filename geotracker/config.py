@@ -98,6 +98,53 @@ class ClientConfig:
         return self.repetitions
 
 
+# Les fournisseurs que get_engine() (engines/__init__.py) sait construire.
+# Dupliqué ICI et pas importé de là-bas : engines importe config, l'inverse
+# créerait un cycle. Si un fournisseur s'ajoute, les DEUX listes bougent.
+PROVIDERS_CONNUS = ("anthropic", "openai", "perplexity", "dataforseo", "ai_overview")
+
+
+def _problemes(cfg: ClientConfig) -> list[str]:
+    """Les incohérences d'une config VALIDE en YAML mais fausse en pratique.
+
+    Passe 7 (décision Marion, 08/08/2026) : même logique que la config
+    illisible — on ne génère pas une page fausse. Chaque cas de cette liste
+    a été observé produire un résultat faux SILENCIEUX (rival égal à la
+    cible : duel contre soi-même à 15 égalités) ou un piège durable (une
+    faute de frappe dans les requêtes d'un fait survivait pour toujours en
+    « aucune réponse exploitable »)."""
+    from .models import domain_matches
+
+    pb: list[str] = []
+    if not cfg.target_domains:
+        pb.append("aucun domaine cible (target.domains) : rien ne peut être mesuré")
+    if cfg.rival:
+        if any(domain_matches(cfg.rival, d) or domain_matches(d, cfg.rival)
+               for d in cfg.target_domains):
+            pb.append(f"le rival ({cfg.rival}) est le domaine cible : "
+                      f"le duel se jouerait contre soi-même")
+    ids = {p.id for p in cfg.prompts}
+    for a in cfg.attributs:
+        if not a.get("termes"):
+            pb.append(f"attribut '{a.get('id', '?')}' au lexique vide : "
+                      f"il resterait à 0 % pour toujours")
+    for f in cfg.faits:
+        inconnues = [q for q in f.get("requetes", []) if q not in ids]
+        if inconnues:
+            pb.append(f"fait '{f.get('id', '?')}' : requête(s) {', '.join(inconnues)} "
+                      f"absente(s) du jeu — faute de frappe ?")
+        if not f.get("requetes"):
+            pb.append(f"fait '{f.get('id', '?')}' sans requêtes : jamais mesuré")
+        if not f.get("juste"):
+            pb.append(f"fait '{f.get('id', '?')}' sans termes `juste` : "
+                      f"il ne pourrait jamais être vrai")
+    for e in cfg.engines:
+        if e.provider not in PROVIDERS_CONNUS:
+            pb.append(f"moteur '{e.id}' : fournisseur inconnu '{e.provider}' "
+                      f"(connus : {', '.join(PROVIDERS_CONNUS)})")
+    return pb
+
+
 def load_client(name: str) -> ClientConfig:
     path = CLIENTS_DIR / f"{name}.yaml"
     if not path.exists():
@@ -134,7 +181,7 @@ def load_client(name: str) -> ClientConfig:
     if len(ids) != len(set(ids)):
         raise ValueError("Deux requêtes portent le même id : la série serait ambiguë.")
 
-    return ClientConfig(
+    cfg = ClientConfig(
         client=raw["client"],
         label=raw.get("label", raw["client"]),
         set_version=int(raw.get("set_version", 1)),
@@ -154,3 +201,11 @@ def load_client(name: str) -> ClientConfig:
         repetitions_ai_overview=int(sampling.get("repetitions_ai_overview", 3)),
         path=path,
     )
+    pb = _problemes(cfg)
+    if pb:
+        details = "\n".join(f"  - {p}" for p in pb)
+        raise SystemExit(
+            f"Configuration incohérente ({path.name}) :\n{details}\n"
+            f"Rien n'est généré : un rapport produit depuis cette config serait faux."
+        )
+    return cfg

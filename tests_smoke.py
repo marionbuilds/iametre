@@ -182,4 +182,22 @@ if shutil.which("node"):
 else:
     print("--  javascript non verifie (node absent)")
 
-print("\n10/10 tests passes")
+# 11. la config incohérente est refusée au chargement (passe 7, 08/08) :
+# même logique que la config illisible, on ne génère pas une page fausse.
+_src = cfg.path.read_text(encoding="utf-8")
+_casse = (_src.replace("rival: atelier-martin.fr", "rival: maison-dupont.fr")
+              .replace("requetes: [q01]", "requetes: [q99]"))
+_tmp = cfg.path.parent / "casse-test.yaml"
+_tmp.write_text(_casse, encoding="utf-8")
+try:
+    try:
+        load_client("casse-test")
+        raise AssertionError("la config incohérente aurait dû être refusée")
+    except SystemExit as e:
+        _msg = str(e)
+        assert "rival" in _msg and "q99" in _msg, _msg
+finally:
+    _tmp.unlink()
+print("OK  config incohérente refusée (rival = cible, requête fantôme)")
+
+print("\n11/11 tests passes")

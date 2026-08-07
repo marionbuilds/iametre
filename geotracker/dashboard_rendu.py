@@ -1220,7 +1220,7 @@ def rendu(d: dict) -> str:
     <header class="mhead">
       <div><h1>{_e(m['client_label'])}</h1>
         <p class="mhead__sub">Collecte #{m['run_id']} · {_e(m['date'])} ·
-          {m['n_appels']} appels · {_e(m['prochaine_collecte'])}</p></div>
+          {m['n_appels']} appel{'' if m['n_appels'] < 2 else 's'} · {_e(m['prochaine_collecte'])}</p></div>
       <div class="mhead__acts">
         <div class="pop-wrap">
           <button class="iconbtn" id="reglages" aria-expanded="false"

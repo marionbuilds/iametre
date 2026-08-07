@@ -49,7 +49,7 @@ def run_summary(conn, run_id: int, exclure=(), avec_memoire: bool = False) -> di
     row = conn.execute(
         f"""
         SELECT COUNT(*) AS n,
-               SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) AS ok,
+               SUM(CASE WHEN {db.EXPLOITABLE} THEN 1 ELSE 0 END) AS ok,
                SUM(COALESCE(cited, 0))       AS cited,
                AVG(source_rank)              AS avg_rank,
                AVG(text_position)            AS avg_position
@@ -94,7 +94,7 @@ def taux_commun(conn, run_id: int, engines, prompts) -> dict:
     row = conn.execute(
         f"""
         SELECT COUNT(*) AS n,
-               SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) AS ok,
+               SUM(CASE WHEN {db.EXPLOITABLE} THEN 1 ELSE 0 END) AS ok,
                SUM(COALESCE(cited, 0)) AS cited,
                AVG(source_rank) AS avg_rank
         FROM responses WHERE run_id = ?
@@ -211,8 +211,12 @@ def report_run(conn, run_id: int, comp: dict | None) -> None:
     # taux de visibilité porte le sien : moteurs avec recherche web seulement,
     # la mémoire de marque est un axe à part (correction du 05/08).
     print("\n## Vue d'ensemble")
-    print(f"  Appels réussis        : {total['ok']}/{total['n']}"
-          + (f"  ⚠️ {total['errors']} erreurs" if total["errors"] else ""))
+    # « non exploitables », pas « erreurs » : le compte inclut aussi les
+    # réponses vides sans erreur (pas d'AI Overview affiché), exclues du
+    # taux comme les échecs depuis le 08/08/2026.
+    print(f"  Appels exploitables   : {total['ok']}/{total['n']}"
+          + (f"  ⚠️ {total['errors']} non exploitables (erreur ou réponse vide)"
+             if total["errors"] else ""))
     print(f"  Taux de visibilité    : {_pct(current['cited'], current['ok'])}  "
           f"(moteurs avec recherche web : {current['cited']}/{current['ok']})")
     if comp:
@@ -231,10 +235,10 @@ def report_run(conn, run_id: int, comp: dict | None) -> None:
 
     print("\n## Par moteur")
     rows = conn.execute(
-        """
+        f"""
         SELECT engine_id, search_enabled,
                COUNT(*) AS n,
-               SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) AS ok,
+               SUM(CASE WHEN {db.EXPLOITABLE} THEN 1 ELSE 0 END) AS ok,
                SUM(COALESCE(cited, 0)) AS cited,
                AVG(source_rank) AS avg_rank
         FROM responses WHERE run_id = ?
@@ -250,9 +254,9 @@ def report_run(conn, run_id: int, comp: dict | None) -> None:
 
     print("\n## Par requête  (cité / appels réussis, moteurs avec recherche)")
     rows = conn.execute(
-        """
+        f"""
         SELECT prompt_id, prompt_text,
-               SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) AS ok,
+               SUM(CASE WHEN {db.EXPLOITABLE} THEN 1 ELSE 0 END) AS ok,
                SUM(COALESCE(cited, 0)) AS cited
         FROM responses WHERE run_id = ? AND search_enabled=1
         GROUP BY prompt_id ORDER BY cited * 1.0 / MAX(ok, 1) DESC, prompt_id

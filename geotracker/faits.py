@@ -115,8 +115,7 @@ def main(argv: list[str] | None = None) -> int:
     lignes = conn.execute(
         f"""SELECT run_id, prompt_id, engine_id, cited, answer_text
            FROM responses
-           WHERE client = ? AND error IS NULL AND answer_text IS NOT NULL
-             AND answer_text <> '' {clause}""",
+           WHERE client = ? AND {db.EXPLOITABLE} {clause}""",
         (cfg.client, *params),
     ).fetchall()
     conn.close()

@@ -14,6 +14,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB = ROOT / "data" / "runs.sqlite3"
 
+# Un appel EXPLOITABLE : pas d'erreur ET une réponse non vide. Une réponse
+# vide sans erreur (Google qui n'affiche pas d'AI Overview sur la requête)
+# n'est PAS une non-citation : il n'y a pas eu de réponse où être citée.
+# Elle est donc exclue du taux, comme les appels en échec — même logique,
+# décision Marion du 08/08/2026 (passe 7 : 5 cas réels en base, dont 2 dans
+# le run #15, faisaient baisser le taux à cause d'un comportement de Google
+# sans rapport avec la visibilité). TOUT dénominateur du produit interpole
+# cette définition — report, dashboard, faits, attributs : si elle change,
+# tout change ensemble, aucun module ne peut diverger.
+EXPLOITABLE = "(error IS NULL AND answer_text IS NOT NULL AND answer_text <> '')"
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,

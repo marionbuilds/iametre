@@ -23,6 +23,7 @@ from __future__ import annotations
 import math
 from urllib.parse import urlparse
 
+from . import db
 from .config import load_client, load_produit
 from .format import nb, points
 from .report import collecte_comparable, couverture, run_summary, serie_commune, taux_commun
@@ -104,7 +105,7 @@ def _collecte(conn, run_id: int) -> dict:
             )
             for r in conn.execute(
                 f"""SELECT engine_id, search_enabled,
-                          SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) AS ok,
+                          SUM(CASE WHEN {db.EXPLOITABLE} THEN 1 ELSE 0 END) AS ok,
                           SUM(COALESCE(cited,0)) AS cited, AVG(source_rank) AS avg_rank
                    FROM responses WHERE run_id=?{cl_r} GROUP BY engine_id""",
                 (run_id, *pr_r),
@@ -121,12 +122,22 @@ def _collecte(conn, run_id: int) -> dict:
              erreurs=(r["total"] - (r["ok"] or 0)), exemple=r["exemple"] or "")
         for r in conn.execute(
             f"""SELECT engine_id, COUNT(*) AS total,
-                      SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) AS ok,
+                      SUM(CASE WHEN {db.EXPLOITABLE} THEN 1 ELSE 0 END) AS ok,
                       MAX(error) AS exemple
                FROM responses WHERE run_id=?{cl_r} GROUP BY engine_id""",
             (run_id, *pr_r),
         ).fetchall()
     ]
+    # Passe 7 (décision Marion, 08/08/2026) : la complétude se compare aux
+    # moteurs ACTIVÉS dans la config, JAMAIS aux moteurs présents dans le
+    # run. Sans ça, un run interrompu après un seul moteur affichait
+    # « Collecte complète » avec une jauge à 100 % : le faux silencieux
+    # le plus grave du banc d'essai.
+    presents = {s["id"] for s in sante}
+    for e in cfg.engines:
+        if e.enabled and e.id not in presents:
+            sante.append(dict(id=e.id, total=0, ok=0, erreurs=0,
+                              exemple="", absent=True))
 
     # Matrice moteur × requête : le croisement que ni le taux par requête ni le
     # taux par moteur ne donnent. C'est là que se lisent les décisions du type
@@ -134,7 +145,7 @@ def _collecte(conn, run_id: int) -> dict:
     matrice: dict[str, dict[str, dict]] = {}
     for r in conn.execute(
         f"""SELECT prompt_id AS pid, engine_id AS eid,
-                  SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) AS ok,
+                  SUM(CASE WHEN {db.EXPLOITABLE} THEN 1 ELSE 0 END) AS ok,
                   SUM(COALESCE(cited,0)) AS cites
            FROM responses WHERE run_id=?{cl_r} GROUP BY prompt_id, engine_id""",
         (run_id, *pr_r),
@@ -153,8 +164,8 @@ def _collecte(conn, run_id: int) -> dict:
                 taux=(r["cited"] or 0) / r["ok"] * 100 if r["ok"] else 0,
             )
             for r in conn.execute(
-                """SELECT prompt_id, prompt_text, MAX(prompt_type) AS prompt_type,
-                          SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) AS ok,
+                f"""SELECT prompt_id, prompt_text, MAX(prompt_type) AS prompt_type,
+                          SUM(CASE WHEN {db.EXPLOITABLE} THEN 1 ELSE 0 END) AS ok,
                           SUM(COALESCE(cited,0)) AS cited
                    FROM responses WHERE run_id=? AND search_enabled=1
                    GROUP BY prompt_id""",
@@ -210,7 +221,7 @@ def _collecte(conn, run_id: int) -> dict:
         f"""SELECT SUM(COALESCE(cited,0)) c,
                SUM(CASE WHEN COALESCE(cited,0)=1 AND source_rank=1 THEN 1 ELSE 0 END) n1,
                SUM(COALESCE(cited_in_text,0)) t,
-               SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) ok
+               SUM(CASE WHEN {db.EXPLOITABLE} THEN 1 ELSE 0 END) ok
            FROM responses WHERE run_id=? AND search_enabled=1{cl_r}""",
         (run_id, *pr_r),
     ).fetchone()
@@ -225,7 +236,7 @@ def _collecte(conn, run_id: int) -> dict:
                        SUM(COALESCE(cited,0)) c,
                        SUM(CASE WHEN COALESCE(cited,0)=1 AND source_rank=1
                            THEN 1 ELSE 0 END) n1
-                   FROM responses WHERE run_id=? AND error IS NULL
+                   FROM responses WHERE run_id=? AND {db.EXPLOITABLE}
                      AND search_enabled=1{cl_r}
                    GROUP BY prompt_id HAVING SUM(COALESCE(cited,0)) > 0""",
                 (run_id, *pr_r),
@@ -269,9 +280,9 @@ def _collecte(conn, run_id: int) -> dict:
     if rival:
         for r in conn.execute(
             f"""SELECT prompt_id pid, MAX(prompt_text) texte,
-                   SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) ok,
+                   SUM(CASE WHEN {db.EXPLOITABLE} THEN 1 ELSE 0 END) ok,
                    SUM(COALESCE(cited,0)) moi,
-                   SUM(CASE WHEN error IS NULL AND EXISTS(
+                   SUM(CASE WHEN {db.EXPLOITABLE} AND EXISTS(
                          SELECT 1 FROM sources s WHERE s.response_id=responses.id
                            AND (s.domain=? OR s.domain LIKE '%.'||?)
                        ) THEN 1 ELSE 0 END) lui
@@ -561,9 +572,21 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
     # Santé de la collecte. Un moteur qui tombe ne fait PAS échouer le job : il
     # est sauté proprement et creuse un trou muet dans la série. Le seul
     # remède est de le montrer ici, à côté du taux, à chaque lecture.
-    casses = [s for s in d["sante"] if s["erreurs"]]
-    muets = [s for s in d["sante"] if s["ok"] == 0]
-    if muets:
+    # Passe 7 : les moteurs configurés mais ABSENTS du run (interruption en
+    # cours d'écriture) passent en tête — un run amputé doit le dire.
+    absents = [s for s in d["sante"] if s.get("absent")]
+    casses = [s for s in d["sante"] if s["erreurs"] and not s.get("absent")]
+    muets = [s for s in d["sante"] if s["ok"] == 0 and not s.get("absent")]
+    n_conf = len(d["sante"])  # moteurs activés dans la config (présents + absents)
+    if absents:
+        noms = ", ".join(NOMS_COURTS.get(s["id"], s["id"]) for s in absents)
+        seul = len(absents) == 1
+        sante = {"variante": "muette",
+                 "texte": (f"⚠ Collecte interrompue : {noms} "
+                           f"{'n’a jamais été interrogé' if seul else 'n’ont jamais été interrogés'} "
+                           f"({len(d['sante']) - len(absents)}/{n_conf} moteurs couverts). "
+                           f"La collecte s'est arrêtée avant la fin, à relancer.")}
+    elif muets:
         noms = ", ".join(NOMS_COURTS.get(s["id"], s["id"]) for s in muets)
         sante = {"variante": "muette",
                  "texte": (f"⚠ {noms} n'a rien renvoyé de la collecte : la série a un trou "
@@ -574,13 +597,14 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
         )
         tot = d["resume_total"]
         sante = {"variante": "partielle",
-                 "texte": (f"Collecte complète à {tot['ok'] / tot['n'] * 100:.0f} % : {detail}. "
-                           f"Les appels perdus sont exclus du calcul, ils ne font pas "
-                           f"baisser le taux.")}
+                 "texte": (f"Collecte partielle : {tot['ok'] / tot['n'] * 100:.0f} % des appels "
+                           f"aboutis ({detail}). Les appels sans réponse exploitable sont "
+                           f"exclus du taux, ils ne le font pas baisser.")}
     else:
+        accord = ("le moteur configuré a répondu" if n_conf == 1
+                  else f"les {n_conf} moteurs configurés ont répondu")
         sante = {"variante": "ok",
-                 "texte": (f"Collecte complète : les {len(d['moteurs'])} moteurs ont "
-                           f"répondu, aucun appel perdu.")}
+                 "texte": f"Collecte complète : {accord}, aucun appel perdu."}
 
     # Passe 1 corrigée (Marion, 05/08/2026) : la règle graduée REVIENT dans le
     # hero, sans elle il était à moitié vide. Les stats de part de voix, elles,
