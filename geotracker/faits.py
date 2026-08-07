@@ -51,21 +51,42 @@ from .extract import _fold
 
 def verdict(texte: str, fait: dict) -> str:
     """Le verdict d'une réponse sur un fait : « juste », « faux » ou « muet ».
-    Pur et déterministe, appelable sur n'importe quel texte, sans base."""
-    prose = _fold(_URL.sub(" ", texte or ""))
-    if any(_contient(prose, t) for t in fait.get("juste", [])):
-        return "juste"
-    if any(_contient(prose, t) for t in fait.get("faux", [])):
-        return "faux"
-    return "muet"
+    Pur et déterministe, appelable sur n'importe quel texte, sans base.
 
-
-def _extrait(texte: str, termes: list[str]) -> str:
-    """La première phrase où un des termes apparaît (hors URL), pour montrer
-    le verdict mot pour mot. Le découpage en phrases ne sert qu'à L'AFFICHAGE,
-    jamais au verdict."""
+    Champ optionnel `contexte` (resserrage du 08/08, décision Marion) : quand
+    un terme de preuve est trop générique (« tronc commun » vaut pour l'APSF
+    comme pour l'ASEC), le fait déclare des termes de contexte, et la preuve
+    ne compte que DANS UNE PHRASE qui porte aussi le contexte — la règle des
+    attributs, appliquée au cas par cas. Même limite héritée : dans une liste
+    à puces, contexte et preuve peuvent être séparés (borne basse). Sans
+    `contexte`, la preuve se cherche sur toute la prose."""
+    juste, faux = fait.get("juste", []), fait.get("faux", [])
+    ctx = fait.get("contexte")
+    if not ctx:
+        prose = _fold(_URL.sub(" ", texte or ""))
+        if any(_contient(prose, t) for t in juste):
+            return "juste"
+        if any(_contient(prose, t) for t in faux):
+            return "faux"
+        return "muet"
+    a_juste = a_faux = False
     for phrase in _phrases(texte or ""):
         prose = _fold(_URL.sub(" ", phrase))
+        if not any(_contient(prose, c) for c in ctx):
+            continue
+        a_juste = a_juste or any(_contient(prose, t) for t in juste)
+        a_faux = a_faux or any(_contient(prose, t) for t in faux)
+    return "juste" if a_juste else ("faux" if a_faux else "muet")
+
+
+def _extrait(texte: str, termes: list[str], contexte: list[str] | None = None) -> str:
+    """La première phrase où un des termes apparaît (hors URL, et portant le
+    contexte si le fait en déclare un), pour montrer le verdict mot pour mot.
+    Ce découpage en phrases ne sert qu'à L'AFFICHAGE."""
+    for phrase in _phrases(texte or ""):
+        prose = _fold(_URL.sub(" ", phrase))
+        if contexte and not any(_contient(prose, c) for c in contexte):
+            continue
         if any(_contient(prose, t) for t in termes):
             p = phrase.strip()
             return p if len(p) <= 160 else p[:157] + "…"
@@ -129,9 +150,11 @@ def main(argv: list[str] | None = None) -> int:
                 if l["cited"]:
                     juste_et_source += 1
                     m["source"] += 1
-                ex_juste = ex_juste or _extrait(l["answer_text"], fait.get("juste", []))
+                ex_juste = ex_juste or _extrait(l["answer_text"], fait.get("juste", []),
+                                                fait.get("contexte"))
             elif v == "faux":
-                ex_faux = ex_faux or _extrait(l["answer_text"], fait.get("faux", []))
+                ex_faux = ex_faux or _extrait(l["answer_text"], fait.get("faux", []),
+                                              fait.get("contexte"))
 
         n = len(cibles)
         print(f"\n## {fait['label']}  ({', '.join(fait['requetes'])} · {n} réponses)")

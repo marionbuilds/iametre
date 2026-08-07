@@ -117,7 +117,14 @@ assert verdict("Le MAPS remplace l'APT.", f2) == "faux"
 # Juste et faux co-présents : juste gagne (limite documentée dans faits.py).
 assert verdict("Le MAPST, parfois écrit MAPS à tort.", f2) == "juste"
 assert verdict("", f2) == "muet"
-print("OK  faits : juste/faux/muet, URLs exclues, MAPS ne matche pas MAPST")
+# `contexte` (resserrage 08/08) : la preuve ne compte que dans une phrase qui
+# porte aussi le contexte — le cas réel : « tronc commun » vaut pour l'APSF
+# comme pour l'ASEC, seul le contexte les départage.
+f3 = {"contexte": ["APSF"], "juste": ["tronc commun"], "faux": ["4 blocs"]}
+assert verdict("L'APSF propose un tronc commun.", f3) == "juste"
+assert verdict("L'ASEC repose sur un tronc commun. L'APSF évolue aussi.", f3) == "muet"
+assert verdict("L'APSF garde 4 blocs.", f3) == "faux"
+print("OK  faits : juste/faux/muet, URLs exclues, MAPS≠MAPST, contexte par phrase")
 
 # 9. etats vides : aucun bloc ne disparait sans un mot (passe du 06/08).
 # Les fonctions de rendu s'appellent avec des dictionnaires ecrits a la main,
