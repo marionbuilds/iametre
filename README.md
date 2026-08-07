@@ -55,7 +55,7 @@ Deux limites, assumées : le découpage de phrases est fruste (dans les listes �
 
 Un point de méthode qui compte : cette métrique a été écrite le 6 août et s'est calculée sur les collectes du 28 juillet. C'est ce que permet la conservation du brut : les agrégats se recalculent, y compris ceux qui n'existaient pas encore au moment de la collecte.
 
-## Les deux garde-fous
+## Les trois garde-fous
 
 **La marge de fluctuation.** Un taux de citation calculé sur un échantillon a une marge d'erreur. Elle est calculée à 95 % (`_marge()`, dans `dashboard_donnees.py`) et l'outil **refuse d'appeler « progression » un mouvement qui tient dedans** : il l'écrit à l'écran, en toutes lettres.
 
@@ -64,9 +64,7 @@ Un point de méthode qui compte : cette métrique a été écrite le 6 août et 
 
 **La comparabilité de périmètre.** Deux collectes ne se comparent que si elles portent sur les **mêmes moteurs** et les **mêmes requêtes**. Quand ce n'est pas le cas, la collecte est écartée du calcul et le rapport le dit, plutôt que de produire un écart qui ne veut rien dire. Même logique pour les appels en échec : ils sont **exclus du taux** au lieu d'être comptés comme des non-citations, sinon une panne d'API ressemble à une chute de visibilité.
 
-## Une expérience en cours : le balisage change-t-il la citation ?
-
-Baliser une page en données structurées change-t-il son taux de citation dans les réponses d'IA ? Personne ne l'a tranché publiquement. Depuis le 6 août, une page du site est destinée au balisage et trois autres servent de témoin, répartition figée dans le YAML. Deux limites annoncées d'emblée : la puissance statistique ne permettra pas de détecter un effet réaliste avant plusieurs mois, et l'on compare une page à trois autres, pas deux groupes tirés au sort — le protocole est le livrable.
+**L'évolution n'est pas une cause.** Depuis le 07/08/2026, tout le site est balisé en entités : la série mesure donc un **avant-après**, pas une expérience contrôlée (celle qui avait été montée a été close sans résultat, sa trace est dans le YAML). Un avant-après ne démontre aucune causalité : une hausse peut venir du balisage, mais aussi de la saisonnalité BPJEPS (rentrée) ou d'une mise à jour des modèles interrogés. L'outil suit une évolution, il ne prouve pas une cause, et tout ce qui en est présenté doit le dire.
 
 ## Limite assumée
 

@@ -306,11 +306,15 @@ def _collecte(conn, run_id: int) -> dict:
     ).fetchall():
         s_vis = run_summary(conn, r["id"], exclure=exclure)
         s_tot = run_summary(conn, r["id"], exclure=exclure, avec_memoire=True)
-        if s_tot["n"]:
-            historique.append(dict(id=r["id"],
-                                   date=r["started_at"][:16].replace("T", " à "),
-                                   note=r["note"] or "", n=s_tot["n"],
-                                   erreurs=s_tot["errors"], taux=s_vis["rate"]))
+        # Un run à ZÉRO réponse (interrompu avant le premier appel) s'affiche
+        # aussi : sa ligne datée compte pour le garde-fou --sauf-si-recente et
+        # peut bloquer une relance le jour même — l'écarter du registre, c'est
+        # cacher à la fois l'interruption à rattraper et la cause du blocage
+        # (états vides, 06/08 ; mécanique tracée au journal le 31/07).
+        historique.append(dict(id=r["id"],
+                               date=r["started_at"][:16].replace("T", " à "),
+                               note=r["note"] or "", n=s_tot["n"],
+                               erreurs=s_tot["errors"], taux=s_vis["rate"]))
 
     points, serie_ctx = serie_commune(conn, meta["client"], exclure, reference=run_id)
     serie = [dict(date=p["date"], taux=p["taux"]) for p in points]
@@ -581,13 +585,26 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
     # Passe 1 corrigée (Marion, 05/08/2026) : la règle graduée REVIENT dans le
     # hero, sans elle il était à moitié vide. Les stats de part de voix, elles,
     # restent une preuve : elles vivent à côté de la carte voix.
+    # Une collecte sans AUCUN appel exploitable n'a pas un taux de 0 %, elle
+    # n'a pas de taux : afficher zéro serait le mensonge que le README dénonce
+    # (états vides, passe du 06/08). La jauge affiche « — » et la phrase dit
+    # ce qui s'est passé.
+    mesurable = bool(r["ok"])
+    if not mesurable:
+        titre = "Aucun appel exploitable sur cette collecte"
+        phrase = (f"Les {d['resume_total']['n']} appels de cette collecte ont tous "
+                  f"échoué : le taux ne peut pas être mesuré. La ligne de santé "
+                  f"ci-dessous dit quels moteurs sont tombés.")
+    else:
+        titre = ("Une réponse d'IA sur deux cite la marque" if 45 <= taux <= 55
+                 else f"{taux:.0f} % des réponses d'IA citent la marque")
     hero = {
         "taux": taux,
+        "mesurable": mesurable,
         # Le périmètre du taux : les moteurs AVEC recherche web uniquement.
         # La mémoire de marque garde sa carte, sur son propre axe.
         "n_moteurs": sum(1 for m in d["moteurs"] if m["recherche"]),
-        "titre": ("Une réponse d'IA sur deux cite la marque" if 45 <= taux <= 55
-                  else f"{taux:.0f} % des réponses d'IA citent la marque"),
+        "titre": titre,
         "badge": badge,
         "phrase": phrase,
         "appels_reussis": r["ok"],
@@ -668,8 +685,10 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
         # Les stats descendues du hero (Passe 1) : c'est de la preuve, elles
         # vivent à côté du classement qu'elles résument.
         "stats": stats,
-        "lead": ({"variante": "domine", "poursuivant": poursuivant["domaine"],
-                  "ecart": moi["part"] - poursuivant["part"]}
+        "lead": ({"variante": "vide", "poursuivant": None, "ecart": None}
+                 if not lignes_voix
+                 else {"variante": "domine", "poursuivant": poursuivant["domaine"],
+                       "ecart": moi["part"] - poursuivant["part"]}
                  if moi and poursuivant and place == 1
                  else {"variante": "neutre", "poursuivant": None, "ecart": None}),
         "lignes": lignes_voix,
@@ -701,6 +720,9 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
     perdues = sum(1 for x in d["duel"] if x["lui"] > x["moi"])
     duel = {
         "affiche": bool(d["duel"]),
+        # Sans rival dans le YAML, la carte disparaît (choix documenté côté
+        # rendu) ; avec un rival mais sans données, elle affiche l'attente.
+        "rival_configure": d["rival"] is not None,
         "rival_label": d["rival_label"],
         "menees": menees, "perdues": perdues,
         "egales": len(d["duel"]) - menees - perdues,

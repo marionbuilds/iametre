@@ -101,7 +101,43 @@ assert _nouveau.count("#") == _texte.count("#") + 1  # le commentaire d'import
 assert "plafond_observation: 5" in _nouveau
 print("OK  carnet : insertion chirurgicale, ids, guillemets echappes")
 
-# 8. le JavaScript de l'interface est syntaxiquement valide
+# 8. etats vides : aucun bloc ne disparait sans un mot (passe du 06/08).
+# Les fonctions de rendu s'appellent avec des dictionnaires ecrits a la main,
+# sans base : c'est exactement ce que l'architecture garantit.
+from geotracker import dashboard_rendu as rendu
+
+# A faire vide : le constat, pas une carte muette
+h = rendu._a_faire({"items": []})
+assert "plus de trou évident à combler" in h, h
+# Duel : pas de rival = disparition (choix documente) ; rival sans donnees = attente dite
+assert rendu._duel({"rival_configure": False, "lignes": [], "affiche": False,
+                    "rival_label": None, "menees": 0, "perdues": 0, "egales": 0}) == ""
+h = rendu._duel({"rival_configure": True, "lignes": [], "affiche": False,
+                 "rival_label": "Atelier Martin", "menees": 0, "perdues": 0, "egales": 0})
+assert "attend une collecte" in h and "Atelier Martin" in h
+# Matrice vide : jamais une vue blanche
+h = rendu._matrice({"affiche": False, "lead": {}, "colonnes": [], "lignes": []})
+assert "première collecte réussie" in h
+# Dominance jamais citee : le lead ne pretend pas « 0 % des cas »
+h = rendu._dominance({"vide": True, "part_n1": 0, "part_texte": 0, "items": []})
+assert "première citation" in h and "0 % des cas" not in h
+# Part de voix sans aucune source
+h = rendu._voix({"total_citations": 1, "domaines_distincts": 0,
+                 "stats": {"place": None, "place_suffixe": "e", "domaines": 0,
+                           "part": None, "rang": None},
+                 "lead": {"variante": "vide", "poursuivant": None, "ecart": None},
+                 "lignes": []})
+assert "rien à classer" in h
+# Hero d'une collecte morte : « — », pas un faux 0 %
+h = rendu._hero({"taux": 0, "mesurable": False, "n_moteurs": 4,
+                 "titre": "Aucun appel exploitable sur cette collecte",
+                 "badge": None, "phrase": "Les 255 appels ont tous échoué.",
+                 "appels_reussis": 0, "palier": 10, "reste": 10.0, "contenus": None,
+                 "sante": {"variante": "muette", "texte": "tout est tombé"}})
+assert ">—" in h and "0<small>%</small>" not in h and "Palier" not in h
+print("OK  etats vides : chaque bloc dit pourquoi il est vide")
+
+# 9. le JavaScript de l'interface est syntaxiquement valide
 #
 # Panne reelle du 29/07 au 05/08/2026 : la constante JS n'etait pas une chaine
 # brute, Python a converti un « \n » du JavaScript en vrai retour a la ligne,
@@ -121,4 +157,4 @@ if shutil.which("node"):
 else:
     print("--  javascript non verifie (node absent)")
 
-print("\n8/8 tests passes")
+print("\n9/9 tests passes")

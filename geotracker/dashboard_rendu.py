@@ -134,7 +134,13 @@ body{font-family:var(--f-body); background:var(--bg); color:var(--ink); line-hei
 .reqattente__aide{font-size:.75rem; color:var(--ink-faint); margin-top:8px}
 .reqattente__aide code, .obs code{font-family:var(--f-mono); font-size:.72rem;
   background:var(--piste); border-radius:5px; padding:1px 5px}
-.obs{margin-top:22px; border-top:1px solid var(--line); padding-top:18px}
+/* Passe 5 : 18px des deux côtés du trait (le bas via padding-top ; le haut
+   par fusion des marges avec les 16px du bloc précédent). Avant : 22/18,
+   le trait flottait. Le titre h3 : une sous-section, un cran sous le titre
+   de carte — deux h2 de même poids dans une carte brouillaient la hiérarchie. */
+.obs{margin-top:18px; border-top:1px solid var(--line); padding-top:18px}
+.obs .card__head h3{font-family:var(--f-display); font-weight:700; font-size:.95rem;
+  letter-spacing:-.01em}
 .reqattente ul{list-style:none; display:grid; gap:6px; margin-bottom:10px}
 .reqattente li{display:flex; align-items:center; justify-content:space-between; gap:12px;
   font-size:.88rem; background:var(--data-soft); color:var(--ink);
@@ -342,12 +348,16 @@ button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-fore
 .mx{overflow-x:auto}
 table.mx__t{border-collapse:separate; border-spacing:0; width:100%; font-size:.82rem}
 table.mx__t th,table.mx__t td{padding:7px 8px; border-bottom:1px solid var(--line)}
-table.mx__t thead th{font-size:.68rem; font-weight:700; color:var(--ink-faint);
-  letter-spacing:.05em; text-transform:uppercase; text-align:center; white-space:nowrap;
+/* Passe 5 : mêmes réglages d'en-tête que les autres tableaux (.7rem/.07em),
+   un en-tête de tableau est un en-tête de tableau. */
+table.mx__t thead th{font-size:.7rem; font-weight:700; color:var(--ink-faint);
+  letter-spacing:.07em; text-transform:uppercase; text-align:center; white-space:nowrap;
   vertical-align:bottom; padding-bottom:9px}
 table.mx__t thead th small{display:block; font-family:var(--f-mono); font-size:.78rem;
   color:var(--ink-soft); letter-spacing:0; text-transform:none; margin-top:3px}
-table.mx__t th.mx__q{text-align:left; width:38%}
+/* vertical-align:top : « Requête » s'aligne sur la ligne des NOMS de moteurs
+   (ses pairs), pas sur la ligne des taux en dessous (Passe 5). */
+table.mx__t th.mx__q{text-align:left; width:38%; vertical-align:top}
 table.mx__t td.mx__q{text-align:left; color:var(--ink-soft); line-height:1.35;
   padding-right:16px}
 table.mx__t td.mx__q b{color:var(--ink); font-weight:600}
@@ -371,8 +381,11 @@ table.mx__t tr:last-child td{border-bottom:none}
   font-size:.78rem; color:var(--ink-soft); background:var(--piste);
   border-radius:7px; padding:5px 10px}
 .al__q b{font-family:var(--f-mono); color:var(--ink-faint); font-weight:700}
-.al__flag{display:inline-block; font-size:.68rem; font-weight:700; text-transform:uppercase;
-  letter-spacing:.07em; padding:3px 8px; border-radius:6px; margin-top:9px;
+/* Passe 5 : bas-de-casse. Les capitales conviennent aux pastilles de 2-3 mots
+   (« Ton allié ») ; sur une phrase entière elles fatiguent et pèsent plus
+   lourd que le titre de la carte. Même pastille, même texte. */
+.al__flag{display:inline-block; font-size:.74rem; font-weight:600;
+  padding:3px 9px; border-radius:6px; margin-top:9px;
   background:var(--opp-soft); color:var(--opp)}
 
 svg.curve{display:block; width:100%; height:auto; margin-top:4px}
@@ -387,6 +400,10 @@ table.d th,table.d td{text-align:left; padding:10px 14px; border-bottom:1px soli
 table.d th{font-size:.7rem; font-weight:700; color:var(--ink-faint); letter-spacing:.07em;
   text-transform:uppercase; white-space:nowrap}
 table.d td.n{font-family:var(--f-mono); white-space:nowrap}
+/* Passe 5 : les colonnes où l'on COMPARE des quantités s'alignent à droite
+   (255, 3, 210 s'empilent), comme partout ailleurs dans le produit. Les
+   identifiants (Réf.) et les dates restent à gauche : on ne les compare pas. */
+table.d th.num,table.d td.num{text-align:right}
 table.d tr:last-child td{border-bottom:none}
 
 [hidden]{display:none!important}
@@ -618,6 +635,20 @@ def _hero(h: dict) -> str:
     reste_txt = f"<strong>+{reste:.0f} pts</strong>"
     if h["contenus"]:
         reste_txt += f" · <strong>{h['contenus']} à {h['contenus'] + 1} contenus à créer</strong>"
+    # Sans mesure, pas de règle graduée : un palier vers 70 % depuis un taux
+    # inexistant n'aurait aucun sens (états vides, 06/08).
+    ruler = ""
+    if h["mesurable"]:
+        ruler = f"""<div class="ruler">
+      <div class="ruler__track">
+        <span class="ruler__ticks"></span>
+        <span class="ruler__fill" style="width:{taux:.0f}%"></span>
+        <span class="ruler__goal" style="left:{palier}%"><span>Palier {palier} %</span></span>
+      </div>
+      <div class="ruler__caption">
+        <span><strong>{taux:.0f} %</strong> aujourd'hui</span><span>{reste_txt}</span>
+      </div>
+    </div>"""
     return f"""  <section class="hero">
     <div class="gauge">
       <svg viewBox="0 0 210 130" aria-hidden="true">
@@ -628,26 +659,18 @@ def _hero(h: dict) -> str:
         <path d="M20 110 A85 85 0 0 1 190 110" fill="none" stroke="var(--signal)"
               stroke-width="14" stroke-linecap="round" stroke-dasharray="{L * taux / 100:.1f} {L}"/>
       </svg>
-      <div class="gauge__value">{taux:.0f}<small>%</small>
+      <div class="gauge__value">{f'{taux:.0f}' if h["mesurable"] else "—"}{'<small>%</small>' if h["mesurable"] else ''}
         <div class="gauge__perim">{h["n_moteurs"]} moteurs de recherche</div></div>
     </div>
     <div class="hero__mid">
       <h2>{h["titre"]}{badge}</h2>
       <p class="eyebrow">Visibilité IA</p>
-      <p>Mesuré sur <strong>{h["appels_reussis"]} appels réussis</strong>, {h["n_moteurs"]} moteurs
-      avec recherche web ; la mémoire de marque (moteur sans recherche) est suivie à part, hors de ce taux. {_e(h["phrase"])}</p>
+      <p>{f'Mesuré sur <strong>{h["appels_reussis"]} appels réussis</strong>, {h["n_moteurs"]} moteurs '
+          f'avec recherche web ; la mémoire de marque (moteur sans recherche) est suivie à part, '
+          f'hors de ce taux. ' if h["mesurable"] else ''}{_e(h["phrase"])}</p>
       {sante_html}
     </div>
-    <div class="ruler">
-      <div class="ruler__track">
-        <span class="ruler__ticks"></span>
-        <span class="ruler__fill" style="width:{taux:.0f}%"></span>
-        <span class="ruler__goal" style="left:{palier}%"><span>Palier {palier} %</span></span>
-      </div>
-      <div class="ruler__caption">
-        <span><strong>{taux:.0f} %</strong> aujourd'hui</span><span>{reste_txt}</span>
-      </div>
-    </div>
+    {ruler}
   </section>"""
 
 
@@ -716,21 +739,27 @@ def _a_faire(af: dict) -> str:
         for q in af["items"][1:]
     )
     queue = f'<div class="queue">{suite}</div>' if suite else ""
+    # Quand tout dépasse 60 %, la carte le DIT au lieu de rester vide
+    # (états vides, 06/08).
+    corps = f"{tete}\n    {queue}" if af["items"] else (
+        '<p class="card__lead">Toutes les requêtes suivies dépassent 60 % de '
+        'citation : plus de trou évident à combler.</p>')
 
     return f"""
   <section class="card">
     <div class="card__head"><h2>À faire</h2>
       <span class="card__hint">classés par gain estimé sur le taux global</span></div>
-{tete}
-    {queue}
+    {corps}
   </section>"""
 
 
 def _voix(v: dict) -> str:
     lead = v["lead"]
     lead_voix = (
-        f"La marque domine, mais <strong>{_e(lead['poursuivant'])} n'est "
-        f"qu'à {_nb(lead['ecart'])} {_points(lead['ecart'])}</strong>."
+        "Aucune source citée sur cette collecte : rien à classer."
+        if lead["variante"] == "vide"
+        else f"La marque domine, mais <strong>{_e(lead['poursuivant'])} n'est "
+             f"qu'à {_nb(lead['ecart'])} {_points(lead['ecart'])}</strong>."
         if lead["variante"] == "domine"
         else "Répartition des citations relevées pendant la collecte."
     )
@@ -793,18 +822,37 @@ def _dominance(dom: dict) -> str:
         f'<div class="st__bar"><i style="width:{max(x["part"], 2):.0f}%"></i></div></li>'
         for x in dom["items"]
     ) or "<li>Aucune citation sur cette collecte.</li>"
+    lead = (
+        "La marque n'est encore citée nulle part : la dominance se mesurera "
+        "à partir de la première citation."
+        if dom["vide"] else
+        f'Être citée ne suffit pas. Quand la marque apparaît, elle est '
+        f'<strong>source n°1 dans {dom["part_n1"]:.0f} % des cas</strong>, et nommée dans le texte même '
+        f'de la réponse dans {dom["part_texte"]:.0f} % des appels. C\'est la prochaine frontière une fois '
+        f'la citation acquise.'
+    )
     return f"""    <section class="card">
       <div class="card__head"><h2>Dominance</h2>
         <span class="card__hint">source n°1, pas juste citée</span></div>
-      <p class="card__lead">Être citée ne suffit pas. Quand la marque apparaît, elle est
-      <strong>source n°1 dans {dom["part_n1"]:.0f} % des cas</strong>, et nommée dans le texte même
-      de la réponse dans {dom["part_texte"]:.0f} % des appels. C'est la prochaine frontière une fois
-      la citation acquise.</p>
+      <p class="card__lead">{lead}</p>
       <ul class="st">{items}</ul>
     </section>"""
 
 
 def _duel(du: dict) -> str:
+    # Pas de rival dans le YAML : la carte disparaît, et c'est un CHOIX —
+    # suivre un rival est une option de configuration, pas un dû. Une carte
+    # « pas de rival » serait du bruit permanent (états vides, 06/08).
+    if not du["rival_configure"]:
+        return ""
+    # Rival configuré mais aucune donnée exploitable : l'attente est dite.
+    if not du["lignes"]:
+        return f"""
+  <section class="card">
+    <div class="card__head"><h2>Duel : toi contre {_e(du["rival_label"])}</h2></div>
+    <p class="card__lead">Le duel contre {_e(du["rival_label"])} attend une collecte
+    exploitable.</p>
+  </section>"""
     if not du["affiche"]:
         return ""
     lignes = "".join(
@@ -841,7 +889,10 @@ def _courbe(c: dict) -> str:
   <p class="card__lead">La courbe apparaîtra à la deuxième collecte, automatique. D'ici là,
   le repère qui compte : <strong>±{_nb(marge)} pts de marge de fluctuation.</strong>
   Une réponse d'IA oscille naturellement dans cette bande ; seul un mouvement qui en sort,
-  ou une tendance sur 3-4 collectes, est un vrai signal.</p>
+  ou une tendance sur 3-4 collectes, est un vrai signal. Depuis le balisage du site en
+  entités (07/08/2026), la courbe se lit en avant-après : elle mesure une évolution,
+  elle ne démontre pas une cause (la rentrée BPJEPS ou une mise à jour des modèles
+  la font bouger aussi).</p>
 </section>"""
 
     serie = c["points"]
@@ -878,7 +929,9 @@ def _courbe(c: dict) -> str:
     bande grisée : marge de fluctuation ±{_nb(marge)} pts</span></div>
   <p class="card__lead">Tant que la ligne reste dans sa bande, la mesure est <strong>stable</strong> :
   l'oscillation est le comportement normal d'une réponse d'IA, pas un recul.
-  Le vrai signal, c'est la tendance sur 3-4 collectes.</p>
+  Le vrai signal, c'est la tendance sur 3-4 collectes. Depuis le balisage du site en
+  entités (07/08/2026), la courbe se lit en <strong>avant-après</strong> : une évolution,
+  pas une preuve de cause (rentrée BPJEPS et mises à jour des modèles la font bouger aussi).</p>
   <svg class="curve" viewBox="0 0 {W} {H}" role="img"
        aria-label="Courbe du taux de citation avec sa marge de fluctuation">
     <line x1="{PAD}" y1="{y(50):.1f}" x2="{W - PAD}" y2="{y(50):.1f}" class="curve__mid"/>
@@ -893,8 +946,15 @@ def _courbe(c: dict) -> str:
 
 
 def _matrice(mx: dict) -> str:
+    # Sans données, la vue ne reste pas BLANCHE : elle dit pourquoi
+    # (états vides, 06/08 — c'était le pire cas de l'inventaire).
     if not mx["affiche"]:
-        return ""
+        return """
+  <section class="card">
+    <div class="card__head"><h2>Quel moteur te cite, sur quel sujet</h2></div>
+    <p class="card__lead">Aucune donnée exploitable sur cette collecte : la matrice
+    apparaîtra à la première collecte réussie.</p>
+  </section>"""
     entetes = "".join(
         f'<th>{_e(col["nom_court"])}<small>{col["taux"]:.0f} %</small></th>'
         for col in mx["colonnes"]
@@ -1033,11 +1093,18 @@ def _vue_requetes(j: dict) -> str:
     ).replace("</", "<\\/")
 
     obs = j["observation"]
-    obs_html = ""
+    # Vide, le bloc ne disparaît pas : la ligne dit où atterrissent les
+    # requêtes du carnet, sinon le parcours d'import finit dans l'invisible
+    # (états vides, 06/08).
+    obs_html = ("""
+  <div class="obs">
+    <p class="reqattente__aide">Rien en observation pour l'instant : les requêtes
+      importées du carnet apparaîtront ici.</p>
+  </div>""")
     if obs["lignes"]:
         lignes_obs = "".join(
             f'<tr><td>{_e(q["texte"])}</td><td class="n">{_e(q["id"])}</td>'
-            + (f'<td class="n">{q["taux"]:.0f} %</td><td class="n">{q["cites"]}/{q["ok"]}</td>'
+            + (f'<td class="n num">{q["taux"]:.0f} %</td><td class="n num">{q["cites"]}/{q["ok"]}</td>'
                if q["taux"] is not None else
                '<td class="n" colspan="2">en attente de première collecte</td>')
             + '</tr>'
@@ -1045,7 +1112,7 @@ def _vue_requetes(j: dict) -> str:
         )
         obs_html = f"""
   <div class="obs">
-    <div class="card__head"><h2>En observation</h2>
+    <div class="card__head"><h3>En observation</h3>
       <span class="card__hint">{len(obs['lignes'])}/{obs['plafond']} ·
       ≈ +{len(obs['lignes'])}&nbsp;$/mois · hors taux global</span></div>
     <p class="card__lead">Ces requêtes sont collectées et mesurées, mais n'entrent ni dans le
@@ -1053,7 +1120,7 @@ def _vue_requetes(j: dict) -> str:
     bouger la série</strong>. Bonnes sur 2-3 collectes, elles sont promues titulaires, c'est-à-dire
     comptées dans le taux global (dans le YAML, en retirant leur ligne <code>statut</code>).</p>
     <div class="tw"><table class="d">
-    <tr><th>Requête</th><th>Réf.</th><th>Citation</th><th>Ratio</th></tr>
+    <tr><th>Requête</th><th>Réf.</th><th class="num">Citation</th><th class="num">Ratio</th></tr>
     {lignes_obs}</table></div>
   </div>"""
 
@@ -1089,8 +1156,8 @@ def _vue_collectes(c: dict) -> str:
     def ligne(h):
         t = f'{h["taux"]:.0f} %' if h["taux"] is not None else "—"
         return (f'<tr><td class="n">#{h["id"]}</td><td class="n">{_e(h["date"])}</td>'
-                f'<td class="n">{h["n"]}</td><td class="n">{h["erreurs"] or "—"}</td>'
-                f'<td class="n">{t}</td><td>{_e(h["note"])}</td></tr>')
+                f'<td class="n num">{h["n"]}</td><td class="n num">{h["erreurs"] or "—"}</td>'
+                f'<td class="n num">{t}</td><td>{_e(h["note"])}</td></tr>')
 
     return f"""<section class="card">
   <div class="card__head"><h2>Collectes</h2>
@@ -1099,7 +1166,7 @@ def _vue_collectes(c: dict) -> str:
   plusieurs fois. <strong>Les réponses brutes sont conservées horodatées</strong> : les taux se
   recalculent, une réponse perdue ne se rattrape pas.</p>
   <div class="tw"><table class="d">
-  <tr><th>Réf.</th><th>Date</th><th>Appels</th><th>Erreurs</th><th>Citation</th><th>Note</th></tr>
+  <tr><th>Réf.</th><th>Date</th><th class="num">Appels</th><th class="num">Erreurs</th><th class="num">Citation</th><th>Note</th></tr>
   {''.join(ligne(h) for h in c['lignes'])}</table></div></section>"""
 
 
