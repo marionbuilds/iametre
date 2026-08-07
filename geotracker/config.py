@@ -72,6 +72,9 @@ class ClientConfig:
     # Attributs de marque (chantier b, 06/08/2026) : ce que les modèles
     # associent à la marque. Liste de {id, label, termes}.
     attributs: list = field(default_factory=list)
+    # Faits vérifiables du secteur (chantier c, 08/08/2026) : liste de
+    # {id, label, requetes, juste, faux} — voir geotracker/faits.py.
+    faits: list = field(default_factory=list)
     # Expérience contrôlée (chantier a) : bloc figé du YAML, tel quel.
     experience: dict | None = None
     # Garde-fou du carnet d'idées (06/08/2026) : l'import refuse d'ajouter
@@ -143,6 +146,7 @@ def load_client(name: str) -> ClientConfig:
         prompts=prompts,
         rival=raw.get("rival"),
         attributs=raw.get("attributs", []),
+        faits=raw.get("faits", []),
         experience=raw.get("experience"),
         plafond_observation=int(raw.get("plafond_observation", 5)),
         engines=engines,

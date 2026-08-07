@@ -104,3 +104,13 @@ engines:
     provider: dataforseo
     search: true
     enabled: true
+
+# Exactitude des faits (optionnel) : les faits vérifiables du secteur, avec
+# la bonne réponse en toutes lettres et les erreurs connues, observées dans
+# le brut. Verdict par réponse : juste / faux / muet (geotracker/faits.py).
+faits:
+  - id: label-officiel
+    label: "Le label officiel est « Artisan en Or »"
+    requetes: [q01]
+    juste: ["artisan en or"]
+    faux: ["artisan d'or"]

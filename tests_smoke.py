@@ -101,7 +101,25 @@ assert _nouveau.count("#") == _texte.count("#") + 1  # le commentaire d'import
 assert "plafond_observation: 5" in _nouveau
 print("OK  carnet : insertion chirurgicale, ids, guillemets echappes")
 
-# 8. etats vides : aucun bloc ne disparait sans un mot (passe du 06/08).
+# 8. exactitude des faits : juste / faux / muet (chantier c, 08/08)
+from geotracker.faits import verdict
+
+fait = cfg.faits[0]  # le label « Artisan en Or » du gabarit d'exemple
+assert verdict("Le label Artisan en Or est décerné par la fédération.", fait) == "juste"
+assert verdict("Ils portent le label artisan d'or depuis 2019.", fait) == "faux"
+assert verdict("Maison Dupont est un atelier réputé.", fait) == "muet"
+# Jamais depuis une URL : un slug ne prouve pas que le modèle DIT la réponse.
+assert verdict("Voir https://exemple.fr/artisan-en-or pour vérifier.", fait) == "muet"
+# Bornes de mots strictes : le cas réel du chantier, MAPS ≠ MAPST.
+f2 = {"juste": ["MAPST"], "faux": ["MAPS"]}
+assert verdict("Le MAPST remplace l'APT.", f2) == "juste"
+assert verdict("Le MAPS remplace l'APT.", f2) == "faux"
+# Juste et faux co-présents : juste gagne (limite documentée dans faits.py).
+assert verdict("Le MAPST, parfois écrit MAPS à tort.", f2) == "juste"
+assert verdict("", f2) == "muet"
+print("OK  faits : juste/faux/muet, URLs exclues, MAPS ne matche pas MAPST")
+
+# 9. etats vides : aucun bloc ne disparait sans un mot (passe du 06/08).
 # Les fonctions de rendu s'appellent avec des dictionnaires ecrits a la main,
 # sans base : c'est exactement ce que l'architecture garantit.
 from geotracker import dashboard_rendu as rendu
@@ -137,7 +155,7 @@ h = rendu._hero({"taux": 0, "mesurable": False, "n_moteurs": 4,
 assert ">—" in h and "0<small>%</small>" not in h and "Palier" not in h
 print("OK  etats vides : chaque bloc dit pourquoi il est vide")
 
-# 9. le JavaScript de l'interface est syntaxiquement valide
+# 10. le JavaScript de l'interface est syntaxiquement valide
 #
 # Panne reelle du 29/07 au 05/08/2026 : la constante JS n'etait pas une chaine
 # brute, Python a converti un « \n » du JavaScript en vrai retour a la ligne,
@@ -157,4 +175,4 @@ if shutil.which("node"):
 else:
     print("--  javascript non verifie (node absent)")
 
-print("\n9/9 tests passes")
+print("\n10/10 tests passes")
