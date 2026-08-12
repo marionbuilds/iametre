@@ -13,7 +13,9 @@
 > **5 vues à libellés visibles** : Vue d'ensemble (hero avec règle graduée, moteurs,
 > À faire, duel, voix + stats, **forteresses + points faibles**, courbe en dernier) ·
 > Moteurs et sujets (matrice) · Ce que les IA citent chez toi (alignement) ·
-> Requêtes (compteurs + formulaire) · **Console** *(ex-« Collectes », restructurée
+> **Exploration** *(ex-« Requêtes » : compteurs, carnet d'idées, et depuis le
+> 12/08/2026 le scan des pages concurrentes — c'est l'étage de PRÉ-SÉLECTION,
+> avant que la requête entre dans la machine)* · **Console** *(ex-« Collectes », restructurée
 > le 12/08/2026 — voir §3.15)*. Acquis : `pages_resume` supprimé,
 > mission + articles fusionnés en « À faire » (contexte et brief OPTIONNELS, portés
 > par l'entrée n°1 : une fusion ne supprime pas de fonctionnalité), tableau des
@@ -28,6 +30,7 @@
 | `geotracker/format.py` | **Module neutre** | `nb()` (nombres à la française) et toute fonction de formatage typographique partagée. **N'importe rien du projet.** La data et le render l'importent tous les deux ; aucun import direct entre data et render, dans aucun sens |
 | `geotracker/dashboard_donnees.py` | **Couche 1 — data** | `donnees(conn, run_id, date_du_jour) -> dict`. Seule couche qui ouvre SQLite et lit les YAML. Reprend : `collecte()`, `_exclusion`, `_impact`, `_marge`, `_promesse`, `_objectif`, `_lecture_moteur`, `_diagnostic`, `_prochaine_collecte`, `_brief`, `_prompt_ia`, `SEUIL_TROU`, `NOMS_MOTEURS`, `NOMS_COURTS` |
 | `geotracker/dashboard_rendu.py` | **Couche 2 — render** | `rendu(d: dict) -> str` et une fonction par bloc visuel. Reprend : `CSS`, `JS`, `_e` (échappement), `_cite` (guillemets français). Aucun import de `db`, `config`, `report` ni `dashboard_donnees` |
+| `geotracker/concurrents.py` | **Scan des pages qui devancent** | `signaux(html, url) -> dict` (fonction **pure**, testable hors ligne) + `scanner()` qui lit les pages et remplit `pages_scan`. N'utilise que `httpx` (déjà présent) et `html.parser` de la bibliothèque standard : **aucune dépendance ajoutée**. Le dashboard le lit, ne l'appelle jamais |
 | `geotracker/dashboard.py` | **CLI, inchangé d'usage** | `python -m geotracker.dashboard` garde exactement les mêmes options. Orchestration : ouvre la base → `donnees()` → `rendu()` → écrit le fichier. Plus l'option d'export JSON (§5) |
 
 Les tests (`tests_smoke.py`, test 6) continuent d'importer `JS` — depuis `dashboard_rendu`.
@@ -216,7 +219,7 @@ de la vue produit).
 | `pages[].reste` | int | requêtes au-delà des 5 affichées (0 = pas de ligne « + N autre(s) ») |
 | `pages[].flag` | dict\|null | `{variante: "accueil"\|"absorbe", n: int}` — seuils : accueil ≥ 3 requêtes, page ≥ 8 requêtes (l.1097-1104) |
 
-### 3.14 `jeu_requetes` — vue « Requêtes » (carnet d'idées, 06/08/2026)
+### 3.14 `jeu_requetes` — vue « Exploration » (carnet d'idées 06/08 · scan 12/08)
 
 | Champ | Type | Provenance actuelle |
 |---|---|---|
@@ -225,6 +228,39 @@ de la vue produit).
 | `suivies` | list | `[{id, texte}]` de TOUTES les requêtes de la CONFIG (titulaires + observation) : contrôle de doublon côté navigateur, y compris pour une requête importée sans donnée encore |
 | `observation.lignes` | list | requêtes `statut: observation` de la config, taux/cites/ok depuis les données (`taux: null` = « en attente de première collecte ») |
 | `observation.plafond` | int | YAML `plafond_observation` (défaut 5) |
+| `exploration` | dict | le scan des pages concurrentes, lu dans `pages_scan` (voir ci-dessous) |
+
+**`exploration`** — `{vide: bool, scanne_le: str, n_pages: int, n_illisibles: int,
+requetes: [{id, texte, taux, absente: bool, moi: dict\|null, autres: [dict],
+lisibles, illisibles}]}`. Chaque entrée de page porte `domaine, url, lisible,
+raison` puis les six critères quand elle est lisible.
+
+⚠️ **Trois invariants de cette section, tous issus de faux évités :**
+
+1. **`vide: True` si la table `pages_scan` n'existe pas.** Le scan est une commande
+   à part, lancée quand on veut : le tableau de bord doit se générer sans elle, et
+   **ne jamais afficher une carte vide** qui laisserait croire que le scan n'a rien
+   trouvé alors qu'il n'a pas tourné.
+2. **`lisible: False` ne renseigne AUCUN critère.** Une page en timeout n'est pas
+   une page sans blog et sans auteur. L'absence de preuve n'est pas une preuve
+   d'absence — c'est la famille de faux silencieux corrigée à la passe 7.
+3. **`absente: True`** = aucune page à nous n'est citée sur cette requête. **Ce
+   n'est pas un défaut de qualité, c'est une absence**, et aucune comparaison de
+   critères ne peut le dire : la carte le nomme à part.
+
+### L'étage de pré-sélection, et son vocabulaire (Marion, 12/08/2026)
+
+Trois statuts, dans cet ordre, et ils ne mesurent pas la même chose :
+
+| Étage | Ce qui se passe | Ce qu'on en tire |
+|---|---|---|
+| **Exploration** | on regarde une fois | qui est là, qui prend la place — **jamais un taux** |
+| **Observation** | collectée chaque semaine, hors agrégats | de quoi décider si elle mérite le suivi |
+| **Suivi** | dans le taux global et la série | la mesure |
+
+⛔ **Un chiffre d'exploration n'est pas une mesure** et ne doit jamais être présenté
+comme telle : une réponse d'IA n'est pas déterministe, c'est la raison d'être du
+produit. Un seul tir sert à découvrir, pas à quantifier.
 
 Le tableau des titulaires reste fusionné dans la matrice (Passe 1). Le formulaire
 alimente un brouillon localStorage (avertissement de fragilité affiché), le bouton

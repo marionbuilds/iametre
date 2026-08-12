@@ -83,7 +83,39 @@ Un taux de citation dit qu'on n'est pas là. Il ne dit pas **qui y est à notre 
 
 La table `sources` stocke le domaine de **chaque** citation de **chaque** réponse, pas seulement les nôtres. La carte « Tes points faibles » n'a donc rien eu à collecter de neuf : elle croise les requêtes sous le seuil de citation avec les domaines qui occupent le terrain sur ces mêmes requêtes.
 
-> **Ce que la carte ne prétend pas faire, et c'est écrit dessus** : savoir qui est devant ne dit pas *pourquoi*. Mesurer le pourquoi — fraîcheur du contenu, autorité, signaux E-E-A-T — demanderait d'aller lire les pages concurrentes, et pour l'autorité une source de backlinks payante. Tant que ce n'est pas fait, la carte nomme un fait et s'arrête là.
+> **Ce que la carte ne prétend pas faire, et c'est écrit dessus** : savoir qui est devant ne dit pas *pourquoi*. C'est la vue Exploration qui s'en charge.
+
+## Exploration : ce que font ceux qui te devancent
+
+Un étage de **pré-sélection**, avant qu'une requête entre dans la machine hebdomadaire. On y explore — une page lue une fois, un instantané daté — là où la collecte, elle, mesure.
+
+```bash
+python -m geotracker.concurrents            # les requêtes faibles de la dernière collecte
+python -m geotracker.concurrents --dry-run  # montre les pages visées, n'appelle rien
+```
+
+Le tracker connaît l'URL exacte de chaque page citée. Ces pages sont **lues telles quelles** et comparées à la nôtre sur six critères qui ont tous la même propriété : **ils se vérifient dans le HTML.**
+
+| Critère | D'où il sort |
+|---|---|
+| Un blog | chemins éditoriaux dans les liens du site |
+| Un auteur affiché | `author` du balisage, `rel="author"`, encart d'auteur |
+| Fraîcheur | `dateModified` / `datePublished`, `article:modified_time`, `<time>` |
+| Tableaux, listes | comptage des balises |
+| Mentions extérieures | `sameAs` du balisage + liens sortants vers d'autres domaines |
+| Longueur | mots du contenu éditorial, hors navigation |
+
+**Aucun abonnement, aucune donnée achetée** : ni backlinks, ni autorité de domaine. C'est une contrainte assumée, pas un manque — les six critères tiennent sans.
+
+Quatre choses que ce module refuse de faire :
+
+**Il n'établit aucune cause.** « Il est plus frais que toi » n'est pas « il est devant parce qu'il est plus frais ». Un tableau comparatif est précisément l'objet qui donne envie d'oublier le garde-fou n°3, donc l'avertissement est sur la carte elle-même, pas dans une note de bas de page.
+
+**Une page illisible n'est jamais une page vide.** Timeout, 403, contenu rendu en JavaScript : la ligne dit « non lisible » et **ne renseigne aucun critère**. L'absence de preuve n'est pas une preuve d'absence — c'est le même faux silencieux que le produit chasse ailleurs.
+
+**Les plateformes sont écartées.** Demander si une vidéo YouTube « a un blog » produirait une ligne de tableau vide de sens, qui se lirait pourtant comme un point faible du concurrent. Qu'elles occupent le terrain reste visible ailleurs.
+
+**Le brut n'est pas conservé, contrairement aux réponses d'IA.** Garder le HTML de vingt pages par collecte gonflerait une base versionnée dans Git. Conséquence assumée et écrite : **un scan est un instantané daté qui ne se rejoue pas.** C'est l'exact inverse de la règle qui vaut pour les réponses d'IA, où le brut est le seul actif non copiable.
 
 Au passage, deux cartes ont fusionné : « forteresses » portait le taux de citation, « dominance » la part de première position — **sur presque les mêmes requêtes**, quatre lignes sur cinq en commun. Elles se lisaient comme une répétition. Les deux mesures tiennent maintenant sur la même ligne : citée à X %, première dans Y % de ses citations.
 

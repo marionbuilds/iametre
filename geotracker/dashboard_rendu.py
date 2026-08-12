@@ -417,6 +417,12 @@ button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-fore
 /* Fusion forteresses × dominance et carte « points faibles » (12/08/2026).
    Les points faibles portent l'AMBRE, jamais le rouge : un trou de couverture
    est un sujet à écrire, pas un incident (§2 bis du brief de front). */
+/* Deux cartes côte à côte : leurs LISTES doivent démarrer à la même hauteur,
+   sinon chaque ligne de l'une tombe entre deux lignes de l'autre et l'œil ne
+   peut plus les comparer (vu par Marion le 12/08/2026). Les chapeaux étant de
+   longueurs différentes, on leur impose un plancher commun. */
+.grid .card__lead{min-height:4.4em}
+@media(max-width:1020px){.grid .card__lead{min-height:0}}
 .st__n1{font-family:var(--f-mono); font-size:.72rem; color:var(--ink-faint); margin-top:6px}
 .st__n1 b{color:var(--ink-soft)}
 .st--faible li h3 span{color:var(--opp)}
@@ -535,7 +541,12 @@ table.d tr:last-child td{border-bottom:none}
 .conshd{display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:18px}
 .conshd .btn--ghost{border-color:var(--line); background:var(--paper); color:var(--ink)}
 .conshd__aide{font-size:.78rem; color:var(--ink-faint); max-width:52ch}
-.card+.card{margin-top:18px}
+/* ⚠️ Portée limitée à la console. Écrite sans le `#v-col`, cette règle
+   s'appliquait aussi à la DEUXIÈME carte d'une grille à deux colonnes — qui
+   est bien un `.card` précédé d'un `.card` — et la décalait de 18 px vers le
+   bas. C'est le désalignement de « points forts » / « points faibles » repéré
+   par Marion le 12/08/2026, une heure après que je l'ai introduit. */
+#v-col .card+.card{margin-top:18px}
 .card--todo{border-left:3px solid var(--opp)}
 .vide{font-size:.9rem; color:var(--ink-soft); background:var(--data-soft);
   border-radius:12px; padding:14px 16px; margin-top:8px}
@@ -569,6 +580,23 @@ table.d tr:last-child td{border-bottom:none}
 /* Hors série : replié, pas supprimé. Une collecte qui n'a pas couvert le jeu
    reste une ligne du registre (garde-fou --sauf-si-recente), elle ne doit
    simplement pas se lire au même rang qu'une vraie collecte. */
+/* Exploration : le tableau comparatif page à page (12/08/2026). Neutre par
+   principe — il CONSTATE des différences, il n'ordonne rien. D'où l'absence
+   de couleur d'alerte : seuls « oui » et « non » se distinguent. */
+.sc{margin-top:22px; padding-top:18px; border-top:1px solid var(--line)}
+.sc:first-of-type{border-top:none; padding-top:0}
+.sc h3{font-size:.95rem; font-weight:700; display:flex; gap:12px;
+  align-items:baseline; justify-content:space-between; margin-bottom:8px}
+.sc__taux{flex:none; font-family:var(--f-mono); font-weight:700; color:var(--opp)}
+.sc__abs{font-size:.84rem; color:var(--ink-soft); background:var(--opp-soft);
+  border-radius:11px; padding:11px 14px; margin-bottom:10px}
+table.sc__t{font-size:.8rem}
+table.sc__t td,table.sc__t th{padding:8px 10px}
+table.sc__t .ok{color:var(--data-deep); font-weight:700}
+table.sc__t .ko{color:var(--ink-faint)}
+table.sc__t tr.sc--moi td{background:var(--data-soft)}
+table.sc__t tr.sc--illisible td{color:var(--ink-faint); font-style:italic}
+.sc__cmd{margin-top:20px; font-size:.78rem}
 .hors{margin-top:16px; border-top:1px solid var(--line); padding-top:14px}
 .hors summary{font-size:.8rem; color:var(--ink-faint); cursor:pointer; max-width:62ch}
 .hors summary:focus-visible{outline:3px solid var(--data-deep); outline-offset:2px}
@@ -974,16 +1002,19 @@ def _forteresses(f: dict) -> str:
     « Dominance » portait la part de n°1 — sur presque les mêmes requêtes, donc
     lues comme une répétition. Les deux mesures tiennent maintenant sur la même
     ligne : citée à X %, première à Y %."""
+    # Chapeau tenu court volontairement (12/08/2026) : à côté, « Tes points
+    # faibles » en fait trois lignes, et deux chapeaux de longueurs
+    # différentes décalent les deux listes l'une par rapport à l'autre — le
+    # désalignement que Marion a vu à l'écran.
     lead = (
-        f"<strong>{_e(f['lead']['texte_requete'])}</strong> à {f['lead']['taux']:.0f} % : la preuve que la "
-        f"méthode fonctionne. Il suffit de la répliquer sur les sujets de la carte « À faire »."
+        f"Les requêtes où la marque tient déjà : citée, et à quelle place dans la réponse."
         if f["lead"]["variante"] == "exemples"
         else "Aucune requête au-dessus de 60 % pour l'instant."
     )
     if f["a_dominance"]:
-        lead += (f' Et être citée ne suffit pas : quand la marque apparaît, elle est '
+        lead += (f' Être citée ne suffit pas : quand la marque apparaît, elle est '
                  f'<strong>source n°1 dans {f["part_n1"]:.0f} % des cas</strong>, et nommée dans '
-                 f'le texte même de la réponse dans {f["part_texte"]:.0f} % des appels.')
+                 f'le texte de la réponse dans {f["part_texte"]:.0f} % des appels.')
     st = ""
     for q in f["items"]:
         # « — » et non « 0 % » : une part de n°1 sur zéro citation n'existe
@@ -994,7 +1025,7 @@ def _forteresses(f: dict) -> str:
                f'<div class="st__bar"><i style="width:{q["taux"]:.0f}%"></i></div>'
                f'<p class="st__n1">source n°1 dans <b>{n1}</b> de ses citations</p></li>')
     return f"""    <section class="card">
-      <div class="card__head"><h2>Tes forteresses</h2>
+      <div class="card__head"><h2>Tes points forts</h2>
         <span class="card__hint">citée, et à quelle place</span></div>
       <p class="card__lead">{lead}</p>
       <ul class="st">{st}</ul>
@@ -1027,11 +1058,12 @@ def _faiblesses(w: dict) -> str:
         else:
             occ = ('<p class="wk__occ wk__occ--libre">Personne ne s\'impose : '
                    'terrain libre, pas une place à prendre.</p>')
-        st = f'{q["cites"]} citation{"s" if q["cites"] > 1 else ""} sur {q["ok"]} réponses'
+        # Le comptage « X citations sur Y réponses » est retiré (Marion,
+        # 12/08/2026) : le taux au-dessus le dit déjà, et cette ligne de plus
+        # allongeait la carte au point de désaligner les deux listes.
         items += (f'<li><h3>{_e(q["texte"])} <span>{q["taux"]:.0f} %</span></h3>'
                   f'<div class="st__bar st__bar--faible">'
-                  f'<i style="width:{max(q["taux"], 2):.0f}%"></i></div>'
-                  f'<p class="st__n1">{st}</p>{occ}</li>')
+                  f'<i style="width:{max(q["taux"], 2):.0f}%"></i></div>{occ}</li>')
     reste = ""
     if w["n_total"] > len(w["items"]):
         reste = (f' Les {len(w["items"])} plus bas sont ici, sur '
@@ -1359,7 +1391,83 @@ def _vue_requetes(j: dict) -> str:
     <p class="reqattente__aide">Puis : <code>python -m geotracker.carnet
       ~/Downloads/propositions-requetes.json</code></p>
   </div>{obs_html}
-  <script type="application/json" id="req-donnees">{donnees_js}</script></section>"""
+  <script type="application/json" id="req-donnees">{donnees_js}</script></section>
+{_exploration(j["exploration"])}"""
+
+
+def _exploration(x: dict) -> str:
+    """« Exploration » : ce que font les pages qui devancent la marque.
+
+    Le mot est de Marion (12/08/2026) et il porte une méthode : cet étage
+    EXPLORE, il ne mesure pas. Une page lue une fois, un instantané daté —
+    la mesure, elle, vit dans la machine hebdomadaire.
+
+    ⚠️ La carte met deux colonnes côte à côte et s'arrête là. Elle
+    n'ordonne aucune action et ne conclut aucune cause : « il est plus frais
+    que toi » n'est pas « il est devant parce qu'il est plus frais ».
+    """
+    if x["vide"]:
+        return ""
+
+    def cellule(v, vrai="oui", faux="non"):
+        return (f'<b class="ok">{vrai}</b>' if v else f'<span class="ko">{faux}</span>')
+
+    def ligne(p, moi=False):
+        if not p["lisible"]:
+            return (f'<tr class="sc--illisible"><td class="n">{_e(p["domaine"])}</td>'
+                    f'<td colspan="6">page non lisible ({_e(p["raison"] or "?")}) — '
+                    f'aucun critère n\'est renseigné, et surtout pas mis à zéro</td></tr>')
+        classe = ' class="sc--moi"' if moi else ""
+        prefixe = "<b>toi</b> · " if moi else ""
+        return (f'<tr{classe}>'
+                f'<td class="n">{prefixe}{_e(p["domaine"])}</td>'
+                f'<td class="num">{cellule(p["blog"])}</td>'
+                f'<td class="num">{cellule(p["auteur"])}</td>'
+                f'<td class="n num">{_e(p["maj"] or "—")}</td>'
+                f'<td class="n num">{p["tableaux"]}</td>'
+                f'<td class="n num">{p["listes"]}</td>'
+                f'<td class="n num">{p["mentions_ext"]}</td>'
+                f'<td class="n num">{p["mots"]}</td></tr>')
+
+    blocs = ""
+    for q in x["requetes"]:
+        taux = f'{q["taux"]:.0f} %' if q["taux"] is not None else "—"
+        if q["absente"]:
+            situation = ('<p class="sc__abs">⭐ <strong>Aucune page à toi n\'est citée '
+                         'sur cette question.</strong> Ce n\'est pas un problème de '
+                         'qualité de page : il n\'y a pas de page. Aucune comparaison '
+                         'de critères ne peut le dire à ta place.</p>')
+        else:
+            situation = ""
+        blocs += (f'<div class="sc"><h3>{_cite(q["texte"])} '
+                  f'<span class="sc__taux">{taux}</span></h3>{situation}'
+                  f'<div class="tw"><table class="d sc__t">'
+                  f'<tr><th>Page</th><th class="num">Blog</th><th class="num">Auteur</th>'
+                  f'<th class="num">Mise à jour</th><th class="num">Tabl.</th>'
+                  f'<th class="num">Listes</th><th class="num">Ment. ext.</th>'
+                  f'<th class="num">Mots</th></tr>'
+                  + (ligne(q["moi"], moi=True) if q["moi"] else "")
+                  + "".join(ligne(a) for a in q["autres"])
+                  + '</table></div></div>')
+
+    illisibles = ""
+    if x["n_illisibles"]:
+        illisibles = (f' {x["n_illisibles"]} page(s) n\'ont pas pu être lues : '
+                      f'elles apparaissent comme telles, jamais comme des pages sans rien.')
+    return f"""<section class="card">
+  <div class="card__head"><h2>Exploration : ce que font ceux qui te devancent</h2>
+    <span class="card__hint">scan du {_e(x['scanne_le'])} · {x['n_pages']} pages</span></div>
+  <p class="card__lead">Sur chaque requête où la marque est faible, les pages qui
+  occupent le terrain sont <strong>lues telles quelles</strong> et comparées à la tienne
+  sur six critères observables. <strong>Aucun abonnement, aucune donnée achetée</strong> :
+  ni backlinks, ni autorité de domaine.{illisibles}
+  <br>⚠️ <strong>Ce tableau constate des différences, il n'établit aucune cause.</strong>
+  « Il est plus frais que toi » ne veut pas dire « il est devant parce qu'il est plus
+  frais ». Et c'est un <em>instantané daté</em> : une page relue dans trois mois aura changé.</p>
+  {blocs}
+  <p class="card__lead sc__cmd">Relancer :
+    <code>python -m geotracker.concurrents</code></p>
+</section>"""
 
 
 def _vue_console(c: dict) -> str:
@@ -1550,14 +1658,14 @@ def rendu(d: dict) -> str:
         <path d="M8.2 11.4 L6.8 12.8 a2.6 2.6 0 0 1 -3.6 -3.6 L4.6 7.8" stroke="currentColor"
               stroke-width="1.6" stroke-linecap="round" fill="none"/></svg><span>Pages citées</span></button>
     <button class="nav" role="tab" aria-selected="false" aria-controls="v-req"
-            title="Requêtes" aria-label="Requêtes">
+            title="Exploration" aria-label="Exploration">
       <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
         <rect x="2" y="2" width="12" height="12" rx="3" stroke="currentColor" stroke-width="1.6"/>
         <circle cx="5.6" cy="5.6" r="1.05" fill="currentColor"/>
         <circle cx="10.4" cy="5.6" r="1.05" fill="currentColor"/>
         <circle cx="8" cy="8" r="1.05" fill="currentColor"/>
         <circle cx="5.6" cy="10.4" r="1.05" fill="currentColor"/>
-        <circle cx="10.4" cy="10.4" r="1.05" fill="currentColor"/></svg><span>Requêtes</span></button>
+        <circle cx="10.4" cy="10.4" r="1.05" fill="currentColor"/></svg><span>Exploration</span></button>
     <button class="nav" role="tab" aria-selected="false" aria-controls="v-col"
             title="Console" aria-label="Console">
       <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">

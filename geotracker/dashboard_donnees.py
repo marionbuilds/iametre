@@ -311,6 +311,8 @@ def _collecte(conn, run_id: int) -> dict:
         key=lambda q: q["taux"], reverse=True,
     )
     requetes = [q for q in toutes if q["statut"] != "observation"]
+    textes_requetes = {q["id"]: q["texte"] for q in toutes}
+    taux_requetes = {q["id"]: q["taux"] for q in toutes}
     # Le bloc « En observation » est revenu avec le carnet d'idées (06/08) :
     # les requêtes proposées y atterrissent, collectées mais hors agrégats.
     observation = [q for q in toutes if q["statut"] == "observation"]
@@ -482,6 +484,27 @@ def _collecte(conn, run_id: int) -> dict:
     }
     couts = _couts_par_run(conn, meta["client"])
 
+    # Le scan des pages concurrentes (concurrents.py). La table peut ne pas
+    # exister : le scan est une commande à part, lancée quand on veut, et le
+    # tableau de bord doit se générer sans elle. Pas de table = pas de carte,
+    # jamais une carte vide qui laisse croire que le scan n'a rien trouvé.
+    scan = []
+    try:
+        scan = [
+            dict(prompt_id=r["prompt_id"], texte=textes_requetes.get(r["prompt_id"], r["prompt_id"]),
+                 taux=taux_requetes.get(r["prompt_id"]), url=r["url"], domain=r["domain"],
+                 est_cible=bool(r["est_cible"]), lisible=bool(r["lisible"]),
+                 raison=r["raison"], scanne_le=r["scanne_le"],
+                 signaux=json.loads(r["signaux_json"]) if r["signaux_json"] else None)
+            for r in conn.execute(
+                "SELECT * FROM pages_scan WHERE run_id=? AND client=? "
+                "ORDER BY prompt_id, est_cible DESC",
+                (run_id, meta["client"]),
+            ).fetchall()
+        ]
+    except Exception:
+        scan = []
+
     historique = []
     for r in conn.execute(
         "SELECT id, started_at, finished_at, note FROM runs WHERE client=? "
@@ -536,6 +559,7 @@ def _collecte(conn, run_id: int) -> dict:
                                 modele=e.model or "", fournisseur=e.provider)
                            for e in cfg.engines],
         "run_debut": meta["started_at"], "run_fin": meta["finished_at"],
+        "scan": scan,
         "historique": historique, "serie": serie, "delta": delta,
         "delta_ctx": delta_ctx, "serie_ctx": serie_ctx,
         "observation": observation,
@@ -648,6 +672,51 @@ def _prochaine_collecte(date_du_jour) -> str:
     jours = (7 - date_du_jour.weekday()) % 7 or 7
     return ("Prochaine collecte demain, lundi." if jours == 1
             else f"Prochaine collecte dans {jours} jours, lundi.")
+
+
+def _exploration(d: dict) -> dict:
+    """Le scan des pages qui devancent la marque, tel que `concurrents.py`
+    l'a enregistré. Vit dans la vue Requêtes, rebaptisée « Exploration » par
+    Marion le 12/08/2026 : c'est l'étage de PRÉ-SÉLECTION, avant qu'une
+    requête entre dans la machine.
+
+    ⚠️ La carte ne conclut RIEN. Elle met deux colonnes côte à côte et
+    laisse lire. « Il est plus frais que toi » n'est pas « il est devant
+    parce qu'il est plus frais » : garde-fou n°3, et un tableau comparatif
+    est exactement ce qui donne envie de l'oublier.
+    """
+    lignes = d.get("scan") or []
+    if not lignes:
+        return {"vide": True, "requetes": [], "scanne_le": None}
+
+    par_requete: dict[str, dict] = {}
+    for l in lignes:
+        e = par_requete.setdefault(l["prompt_id"], {
+            "id": l["prompt_id"], "texte": l["texte"], "taux": l["taux"],
+            "moi": None, "autres": []})
+        entree = {"domaine": l["domain"], "url": l["url"],
+                  "lisible": bool(l["lisible"]), "raison": l["raison"],
+                  **(l["signaux"] or {})}
+        if l["est_cible"]:
+            e["moi"] = entree
+        else:
+            e["autres"].append(entree)
+
+    requetes = []
+    for e in sorted(par_requete.values(), key=lambda x: x["taux"] if x["taux"] is not None else 0):
+        # ⭐ LE CAS QUI COMPTE LE PLUS, et qui n'est pas un défaut de qualité :
+        # aucune page à nous n'est citée du tout. Le sujet n'est pas mal
+        # traité, il est ABSENT. Aucune comparaison de critères ne peut le
+        # dire, il faut le nommer à part.
+        e["absente"] = e["moi"] is None
+        e["lisibles"] = [a for a in e["autres"] if a["lisible"]]
+        e["illisibles"] = [a for a in e["autres"] if not a["lisible"]]
+        requetes.append(e)
+
+    return {"vide": False, "requetes": requetes,
+            "scanne_le": lignes[0]["scanne_le"][:10],
+            "n_pages": len(lignes),
+            "n_illisibles": sum(1 for l in lignes if not l["lisible"])}
 
 
 def _console(d: dict, prochaine: str) -> dict:
@@ -1244,6 +1313,7 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
     }
 
     console = _console(d, _prochaine_collecte(date_du_jour))
+    jeu_requetes["exploration"] = _exploration(d)
 
     meta = {
         "produit_nom": d["produit"]["nom"],

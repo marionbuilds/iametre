@@ -159,6 +159,44 @@ assert "source n°1 dans 32 % des cas" in h and "<b>32 %</b>" in h
 # part_n1 absente : « — », jamais un faux 0 % (meme regle que le hero mort)
 assert "<b>—</b>" in h
 
+# --- Scan des pages concurrentes : extraction PURE, sans reseau ------------
+# Le module lit des sites tiers, qui changent : le test ne doit dependre
+# d'AUCUN d'entre eux. `signaux()` est donc une fonction pure, verifiee sur
+# un HTML ecrit a la main.
+from geotracker.concurrents import signaux, est_plateforme
+
+_riche = """<html><head>
+<script type="application/ld+json">{"@graph":[
+ {"@type":"Article","dateModified":"2026-08-04T10:00:00+02:00",
+  "author":{"@type":"Person","name":"Julie Martin"}},
+ {"@type":"Organization","sameAs":["https://fr.wikipedia.org/x","https://linkedin.com/y"]}]}
+</script></head><body>
+<nav><a href="/blog/taux">Blog</a></nav><p>Une intro.</p>
+<table><tr><td>a</td></tr></table><table><tr><td>b</td></tr></table>
+<ul><li>un</li></ul><a href="https://sports.gouv.fr/t">source</a>
+<div class="author-box">Par Julie</div></body></html>"""
+s = signaux(_riche, "https://exemple.fr/page")
+assert s["blog"] and s["auteur"] and s["auteur_nom"] == "Julie Martin"
+assert s["maj"] == "2026-08-04"          # le balisage prime sur la meta plus vieille
+assert s["tableaux"] == 2 and s["listes"] == 1
+assert s["same_as"] == 2 and s["mentions_ext"] >= 3
+
+# Une page nue : tout tombe a FAUX, et rien ne plante
+nu = signaux("<html><body><p>rien</p></body></html>", "https://x.fr/")
+assert not nu["blog"] and not nu["auteur"] and nu["maj"] is None
+assert nu["tableaux"] == 0 and nu["mentions_ext"] == 0
+
+# HTML casse : on garde ce qu'on a pu lire, on ne leve jamais
+casse = signaux("<html><body><table><tr><td>a<ul><li>x", "https://x.fr/")
+assert casse["tableaux"] == 1
+
+# Les plateformes sont ecartees : demander si une video YouTube « a un blog »
+# produirait une ligne vide de sens, lue comme un point faible du concurrent.
+assert est_plateforme("youtube.com") and est_plateforme("www.youtube.com")
+# Domaine fictif : ce fichier part sur le depot PUBLIC, aucun nom de
+# concurrent reel ne doit y figurer (regle du miroir).
+assert not est_plateforme("centre-exemple.fr")
+
 # Points faibles : sans trou, la carte le CONSTATE au lieu de lister du vide
 h = rendu._faiblesses({"seuil": 25.0, "aucune": True, "n_total": 0, "items": []})
 assert "pas de trou à combler" in h
