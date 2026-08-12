@@ -20,7 +20,9 @@ encore plus vrai le jour où on le montre en entretien.
 
 from __future__ import annotations
 
+import json
 import math
+from datetime import datetime
 from urllib.parse import urlparse
 
 from . import db
@@ -29,6 +31,66 @@ from .format import nb, points
 from .report import collecte_comparable, couverture, run_summary, serie_commune, taux_commun
 
 SEUIL_TROU = 25.0
+
+# ------------------------------------------------------------ familles de panne
+#
+# Console (12/08/2026). Le message brut d'un fournisseur ne dit pas à Marion ce
+# qu'elle doit faire : `HTTP 429: {'message': 'You have no credits remaining'}`
+# et `tâche DataForSEO 40101` demandent l'un une carte bancaire, l'autre rien du
+# tout. Cette table traduit le brut en VERDICT, et c'est le verdict qui décide
+# si la panne remonte dans « Ce que tu dois faire ».
+#
+#   action  : quelque chose est cassé de son côté, elle seule peut le réparer
+#   subir   : l'incident est chez le fournisseur, la collecte suivante repart
+#   inconnu : jamais vu — on n'invente pas de conseil, on propose le diagnostic
+#
+# ⚠️ L'ORDRE COMPTE : le message de crédits épuisés d'OpenAI est SERVI EN 429,
+# donc la famille « crédits » doit être testée avant la famille « cadence »,
+# sinon une panne sèche s'affiche en « ça se dissipe tout seul » et le run
+# suivant est amputé pareil. C'est exactement ce qui est arrivé au run #16.
+FAMILLES_PANNE = (
+    dict(cle="credits", titre="Crédits épuisés chez le fournisseur", verdict="action",
+         motifs=("credit_balance_exhausted", "no credits remaining",
+                 "insufficient_quota", "credit balance is too low", "billing"),
+         quoi_faire="Recharger le compte, et poser une limite de dépense mensuelle "
+                    "dans la foulée : le rechargement empêche la panne sèche, la "
+                    "limite empêche l'emballement.",
+         liens={"openai": "https://platform.openai.com/settings/organization/billing",
+                "anthropic": "https://console.anthropic.com/settings/billing"}),
+    dict(cle="cle", titre="Clé d'accès refusée", verdict="action",
+         motifs=("HTTP 401", "HTTP 403", "invalid_api_key", "authentication",
+                 "unauthorized"),
+         quoi_faire="La clé est absente, expirée, ou n'a pas les droits. Elle se "
+                    "corrige dans trousseau.env, section « PARTIE TRACKER GEO ».",
+         liens={}),
+    dict(cle="cadence", titre="Trop d'appels d'un coup", verdict="subir",
+         motifs=("HTTP 429", "rate_limit", "rate limit"),
+         quoi_faire="Limite de cadence du fournisseur. Elle se dissipe seule ; les "
+                    "appels manquants sont simplement absents de cette collecte.",
+         liens={}),
+    dict(cle="fournisseur", titre="Panne chez le fournisseur", verdict="subir",
+         motifs=("DataForSEO", "Internal SE Server Error", "HTTP 500", "HTTP 502",
+                 "HTTP 503", "HTTP 504", "timeout", "Timeout", "connection"),
+         quoi_faire="Incident de leur côté, rien à faire ici : la collecte suivante "
+                    "repart normalement.",
+         liens={}),
+)
+
+FAMILLE_INCONNUE = dict(
+    cle="inconnu", titre="Panne non répertoriée", verdict="inconnu",
+    quoi_faire="Ce message n'a jamais été rencontré : aucun conseil automatique ne "
+               "serait fiable. Copie le diagnostic et fais-le analyser.",
+    liens={})
+
+
+def _famille(message: str) -> dict:
+    """Traduit un message brut en famille. Insensible à la casse, sur le message
+    ENTIER : les fournisseurs déplacent leurs codes d'un champ à l'autre."""
+    m = (message or "").lower()
+    for f in FAMILLES_PANNE:
+        if any(motif.lower() in m for motif in f["motifs"]):
+            return f
+    return FAMILLE_INCONNUE
 
 NOMS_MOTEURS = {
     "openai": "ChatGPT",
@@ -56,6 +118,67 @@ def _exclusion(exclure, prefixe: str = "") -> tuple[str, tuple]:
         return "", ()
     ids = tuple(sorted(exclure))
     return f" AND {prefixe}prompt_id NOT IN ({','.join('?' * len(ids))})", ids
+
+
+def _cout_appel(usage_json: str | None) -> float | None:
+    """Le coût RÉEL d'un appel, quand le fournisseur le renvoie — jamais un
+    coût reconstitué à partir des jetons.
+
+    Deux fournisseurs sur quatre le donnent en dollars : DataForSEO sous
+    `cost`, Perplexity sous `cost.total_cost`. Anthropic et OpenAI ne
+    renvoient que des jetons ; les convertir supposerait une grille de prix
+    écrite en dur ici, qui vieillirait en silence et finirait par afficher un
+    montant faux avec l'aplomb d'un montant vrai (règle n°1 du dossier :
+    aucun chiffre sans sa source). On préfère un trou signalé.
+    """
+    if not usage_json:
+        return None
+    try:
+        u = json.loads(usage_json)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(u, dict):
+        return None
+    cout = u.get("cost")
+    if isinstance(cout, (int, float)):
+        return float(cout)
+    if isinstance(cout, dict) and isinstance(cout.get("total_cost"), (int, float)):
+        return float(cout["total_cost"])
+    return None
+
+
+def _couts_par_run(conn, client: str) -> dict[int, dict]:
+    """Coût par collecte : ce qui est connu, et si c'est partiel.
+    `partiel` vaut vrai dès qu'un seul appel de la collecte n'a pas rendu de
+    coût — c'est ce drapeau qui empêche d'afficher un total pour un total."""
+    par_run: dict[int, dict] = {}
+    for r in conn.execute(
+        "SELECT run_id, usage_json FROM responses WHERE client=?", (client,)
+    ).fetchall():
+        etat = par_run.setdefault(r["run_id"], {"connu": 0.0, "n_connus": 0, "n": 0})
+        etat["n"] += 1
+        c = _cout_appel(r["usage_json"])
+        if c is not None:
+            etat["connu"] += c
+            etat["n_connus"] += 1
+    for etat in par_run.values():
+        etat["partiel"] = etat["n_connus"] < etat["n"]
+        if not etat["n_connus"]:
+            etat["connu"] = None
+    return par_run
+
+
+def _duree_min(debut: str | None, fin: str | None) -> int | None:
+    """Durée d'une collecte en minutes. `finished_at` est nul quand le run a
+    été interrompu : dans ce cas on ne devine pas, on ne montre rien."""
+    if not debut or not fin:
+        return None
+    try:
+        d = datetime.fromisoformat(debut)
+        f = datetime.fromisoformat(fin)
+    except ValueError:
+        return None
+    return max(0, round((f - d).total_seconds() / 60))
 
 
 def _collecte(conn, run_id: int) -> dict:
@@ -88,12 +211,23 @@ def _collecte(conn, run_id: int) -> dict:
     rival = cfg.rival
     rival_label = (cfg.competitor_label(rival) or rival) if rival else None
     exclure = frozenset(i for i, s in statuts.items() if s == "observation")
+    n_titulaires = sum(1 for s in statuts.values() if s != "observation")
     cl_r, pr_r = _exclusion(exclure)          # sur `responses` sans alias
     cl_j, pr_j = _exclusion(exclure, "r.")    # sur les jointures (alias r)
 
-    resume = run_summary(conn, run_id, exclure=exclure)          # axe visibilité
-    resume_total = run_summary(conn, run_id, exclure=exclure,
-                               avec_memoire=True)                # totaux de collecte
+    # Le PÉRIMÈTRE D'AFFICHAGE, c'est la config, pas la base (même principe que
+    # la Passe 7 plus bas, qui compare la complétude aux moteurs activés).
+    # Un moteur éteint garde ses réponses en base — on ne réécrit pas le brut —
+    # mais il sort du tableau de bord ENTIÈREMENT : cartes, colonnes de la
+    # matrice, ligne de santé et compteurs d'appels. Un filtre à moitié posé
+    # donnerait une vue à quatre cartes annonçant les appels de cinq moteurs.
+    # Éteint le 10/08/2026 : `anthropic-memory` (voir le YAML client).
+    actifs = {e.id for e in cfg.engines if e.enabled}
+
+    resume = run_summary(conn, run_id, exclure=exclure,
+                         moteurs=actifs)                         # axe visibilité
+    resume_total = run_summary(conn, run_id, exclure=exclure, avec_memoire=True,
+                               moteurs=actifs)                   # totaux de collecte
 
     moteurs = sorted(
         (
@@ -110,6 +244,7 @@ def _collecte(conn, run_id: int) -> dict:
                    FROM responses WHERE run_id=?{cl_r} GROUP BY engine_id""",
                 (run_id, *pr_r),
             ).fetchall()
+            if r["engine_id"] in actifs
         ),
         key=lambda m: m["taux"], reverse=True,
     )
@@ -127,6 +262,7 @@ def _collecte(conn, run_id: int) -> dict:
                FROM responses WHERE run_id=?{cl_r} GROUP BY engine_id""",
             (run_id, *pr_r),
         ).fetchall()
+        if r["engine_id"] in actifs
     ]
     # Passe 7 (décision Marion, 08/08/2026) : la complétude se compare aux
     # moteurs ACTIVÉS dans la config, JAMAIS aux moteurs présents dans le
@@ -310,22 +446,74 @@ def _collecte(conn, run_id: int) -> dict:
             delta_ctx = {"prev_id": comp["prev_id"], "n_moteurs": len(comp["engines"]),
                          "reduit": comp["reduit"], "resume": a}
 
+    # ⚠️ DEUX COMPTEURS, JAMAIS UN SEUL (console, 12/08/2026). Une PANNE (le
+    # fournisseur renvoie une erreur) et une ABSENCE DE RÉPONSE (l'appel
+    # aboutit, la réponse est vide — Google qui n'affiche pas d'AI Overview)
+    # sortent toutes les deux du dénominateur, mais n'appellent PAS la même
+    # action : la première se répare, la seconde est le comportement normal du
+    # moteur. L'ancienne colonne « Erreurs » les additionnait, ce qui faisait
+    # passer un non-événement pour un incident — 3 « échecs » affichés au run
+    # #16 côté Google AIO, dont 1 qui n'en était pas un.
+    # Restreint aux moteurs ACTIFS, comme tous les compteurs de la page : un
+    # moteur éteint garde ses réponses en base mais sort du tableau de bord
+    # entièrement (voir plus haut). Sans ce filtre, le journal afficherait des
+    # pannes d'un moteur dont plus aucune carte ne parle.
+    cl_a = f" AND engine_id IN ({','.join('?' * len(actifs))})" if actifs else ""
+    pr_a = tuple(sorted(actifs))
+    pannes: dict[int, list[dict]] = {}
+    for r in conn.execute(
+        f"""SELECT run_id, engine_id, error, COUNT(*) AS n
+            FROM responses
+            WHERE client=? AND error IS NOT NULL AND error <> ''{cl_a}
+            GROUP BY run_id, engine_id, error""",
+        (meta["client"], *pr_a),
+    ).fetchall():
+        pannes.setdefault(r["run_id"], []).append(
+            dict(moteur=r["engine_id"], message=r["error"], n=r["n"]))
+    sans_reponse: dict[int, int] = {
+        r["run_id"]: r["n"]
+        for r in conn.execute(
+            f"""SELECT run_id, COUNT(*) AS n FROM responses
+                WHERE client=? AND (error IS NULL OR error='')
+                  AND (answer_text IS NULL OR answer_text=''){cl_a}
+                GROUP BY run_id""",
+            (meta["client"], *pr_a),
+        ).fetchall()
+    }
+    couts = _couts_par_run(conn, meta["client"])
+
     historique = []
     for r in conn.execute(
-        "SELECT id, started_at, note FROM runs WHERE client=? ORDER BY id DESC LIMIT 25",
+        "SELECT id, started_at, finished_at, note FROM runs WHERE client=? "
+        "ORDER BY id DESC LIMIT 25",
         (meta["client"],),
     ).fetchall():
-        s_vis = run_summary(conn, r["id"], exclure=exclure)
-        s_tot = run_summary(conn, r["id"], exclure=exclure, avec_memoire=True)
+        s_vis = run_summary(conn, r["id"], exclure=exclure, moteurs=actifs)
+        s_tot = run_summary(conn, r["id"], exclure=exclure, avec_memoire=True,
+                            moteurs=actifs)
         # Un run à ZÉRO réponse (interrompu avant le premier appel) s'affiche
         # aussi : sa ligne datée compte pour le garde-fou --sauf-si-recente et
         # peut bloquer une relance le jour même — l'écarter du registre, c'est
         # cacher à la fois l'interruption à rattraper et la cause du blocage
         # (états vides, 06/08 ; mécanique tracée au journal le 31/07).
-        historique.append(dict(id=r["id"],
-                               date=r["started_at"][:16].replace("T", " à "),
-                               note=r["note"] or "", n=s_tot["n"],
-                               erreurs=s_tot["errors"], taux=s_vis["rate"]))
+        n_pannes = sum(p["n"] for p in pannes.get(r["id"], ()))
+        historique.append(dict(
+            id=r["id"], date=r["started_at"][:16].replace("T", " à "),
+            note=r["note"] or "", n=s_tot["n"],
+            erreurs=s_tot["errors"],       # total, gardé pour le rapport texte
+            pannes=n_pannes, sans_reponse=sans_reponse.get(r["id"], 0),
+            taux=s_vis["rate"], detail=pannes.get(r["id"], []),
+            duree_min=_duree_min(r["started_at"], r["finished_at"]),
+            cout=couts.get(r["id"], {}).get("connu"),
+            cout_partiel=couts.get(r["id"], {}).get("partiel", True),
+            # « Hors série » se DÉDUIT, il ne se devine pas : une collecte qui
+            # a lancé moins d'appels qu'il n'y a de requêtes n'a pas pu couvrir
+            # le jeu de suivi. Essai de mise au point ou interruption, on ne
+            # tranche pas — mais dans les deux cas la ligne n'est pas
+            # comparable aux autres, et la mettre au même rang rendait le
+            # tableau illisible (5 lignes de juillet sur 16).
+            hors_serie=s_tot["n"] < n_titulaires,
+        ))
 
     points, serie_ctx = serie_commune(conn, meta["client"], exclure, reference=run_id)
     serie = [dict(date=p["date"], taux=p["taux"]) for p in points]
@@ -340,6 +528,14 @@ def _collecte(conn, run_id: int) -> dict:
         "occupants": occupants, "total_citations": total, "domaines_distincts": distincts,
         "dominance": dominance, "dominance_requetes": dominance_requetes,
         "pages": pages, "duel": duel, "rival": rival, "rival_label": rival_label,
+        "n_titulaires": n_titulaires,
+        # Le périmètre de la machine se lit dans la CONFIG, pas dans le run :
+        # un moteur éteint doit pouvoir se dire éteint, et il n'a par
+        # définition aucune réponse dans la collecte du jour.
+        "engines_config": [dict(id=e.id, actif=e.enabled, recherche=e.search,
+                                modele=e.model or "", fournisseur=e.provider)
+                           for e in cfg.engines],
+        "run_debut": meta["started_at"], "run_fin": meta["finished_at"],
         "historique": historique, "serie": serie, "delta": delta,
         "delta_ctx": delta_ctx, "serie_ctx": serie_ctx,
         "observation": observation,
@@ -452,6 +648,170 @@ def _prochaine_collecte(date_du_jour) -> str:
     jours = (7 - date_du_jour.weekday()) % 7 or 7
     return ("Prochaine collecte demain, lundi." if jours == 1
             else f"Prochaine collecte dans {jours} jours, lundi.")
+
+
+def _console(d: dict, prochaine: str) -> dict:
+    """La vue « Console » : l'ancien registre des collectes retourné.
+
+    Il se lisait dans l'ordre de la machine (un tableau de 16 lignes, une
+    colonne « Erreurs », aucune action). Il se lit maintenant dans l'ordre de
+    Marion : ce qu'elle doit faire, l'état de la machine, le journal en
+    dernier. Restructuré le 12/08/2026 sur son constat : « la page collecte,
+    je la comprends pas, elle me sert à rien, je ne sais pas quelle action je
+    dois faire ».
+
+    Aucune décision n'est prise ici sur ce qui n'est pas mesuré : les actions
+    sortent des pannes RÉELLEMENT en base, jamais d'une prévision de budget
+    écrite dans un fichier.
+    """
+    hist = d["historique"]
+    courant = next((h for h in hist if h["id"] == d["run_id"]), None)
+
+    # --- Bloc 1 : ce qu'il y a à faire, déduit des pannes de la collecte lue.
+    # Une famille par carte, pas un appel par carte : 14 fois le même message
+    # de crédits épuisés, c'est UNE action, pas quatorze.
+    par_famille: dict[str, dict] = {}
+    for p in (courant["detail"] if courant else []):
+        f = _famille(p["message"])
+        cle = (f["cle"], p["moteur"])
+        e = par_famille.setdefault(cle, {
+            "cle": f["cle"], "titre": f["titre"], "verdict": f["verdict"],
+            "quoi_faire": f["quoi_faire"], "moteur": p["moteur"],
+            "moteur_nom": NOMS_COURTS.get(p["moteur"], p["moteur"]),
+            "lien": f["liens"].get(p["moteur"]) or f["liens"].get(
+                p["moteur"].split("-")[0], ""),
+            "n": 0, "messages": [],
+        })
+        e["n"] += p["n"]
+        e["messages"].append(p["message"])
+
+    # La récurrence se calcule sur TOUT l'historique : une panne vue trois
+    # lundis d'affilée n'est pas le même objet qu'une panne vue une fois, et
+    # c'est la seule chose qui distingue un incident d'un état de fait.
+    for e in par_famille.values():
+        e["recurrence"] = sum(
+            1 for h in hist
+            if any(_famille(x["message"])["cle"] == e["cle"]
+                   and x["moteur"] == e["moteur"] for x in h["detail"])
+        )
+
+    actions = [e for e in par_famille.values() if e["verdict"] in ("action", "inconnu")]
+    actions.sort(key=lambda e: (e["verdict"] != "action", -e["n"]))
+    subies = [e for e in par_famille.values() if e["verdict"] == "subir"]
+
+    # Une collecte interrompue est une action, et elle ne laisse aucune panne
+    # derrière elle : le moteur n'a simplement jamais été appelé. Sans cette
+    # entrée, le cas le plus grave du banc d'essai serait le seul à ne rien
+    # afficher dans « Ce que tu dois faire ».
+    absents = [s for s in d["sante"] if s.get("absent")]
+    if absents:
+        noms = ", ".join(NOMS_COURTS.get(s["id"], s["id"]) for s in absents)
+        actions.insert(0, {
+            "cle": "interrompue", "titre": "Collecte interrompue", "verdict": "action",
+            "moteur": "", "moteur_nom": noms, "n": 0, "recurrence": 1, "messages": [],
+            "quoi_faire": f"{noms} n'a jamais été interrogé : la collecte s'est "
+                          f"arrêtée avant la fin. À relancer depuis le Mac, sans "
+                          f"garde-fou de fraîcheur : "
+                          f"python -m geotracker.run --client {d['client']}",
+            "lien": "",
+        })
+
+    # --- Bloc 2 : l'état de la machine, lu dans la config et dans le run.
+    moteurs_on = [e for e in d["engines_config"] if e["actif"]]
+    moteurs_off = [e for e in d["engines_config"] if not e["actif"]]
+    tot = d["resume_total"]
+    etat = {
+        "prochaine": prochaine,
+        "n_moteurs_actifs": len(moteurs_on),
+        "moteurs_actifs": [NOMS_COURTS.get(e["id"], e["id"]) for e in moteurs_on],
+        "moteurs_eteints": [NOMS_COURTS.get(e["id"], e["id"]) for e in moteurs_off],
+        "n_requetes": d["n_titulaires"],
+        "set_version": d["set_version"],
+        "run_id": d["run_id"],
+        "run_date": d["date"],
+        "duree_min": courant["duree_min"] if courant else None,
+        "appels": tot["n"],
+        "exploitables": tot["ok"],
+        "cout": courant["cout"] if courant else None,
+        "cout_partiel": courant["cout_partiel"] if courant else True,
+        # Nommer les fournisseurs muets, plutôt qu'un astérisque : sans ça le
+        # montant se lirait comme un total alors qu'il en couvre la moitié.
+        "cout_muets": sorted({
+            NOMS_COURTS.get(e["id"], e["id"]) for e in moteurs_on
+            if e["fournisseur"] in ("openai", "anthropic")
+        }),
+    }
+
+    return {
+        "actions": actions,
+        "subies": subies,
+        "etat": etat,
+        "journal": {
+            "n": len(hist),
+            "lignes": [{"id": h["id"], "date": h["date"], "n": h["n"],
+                        "pannes": h["pannes"], "sans_reponse": h["sans_reponse"],
+                        "taux": h["taux"], "note": h["note"],
+                        "hors_serie": h["hors_serie"], "cout": h["cout"],
+                        "detail": [{"moteur": NOMS_COURTS.get(x["moteur"], x["moteur"]),
+                                    "n": x["n"], "message": x["message"],
+                                    "famille": _famille(x["message"])["titre"]}
+                                   for x in h["detail"]]}
+                       for h in hist],
+            "n_hors_serie": sum(1 for h in hist if h["hors_serie"]),
+        },
+        "diagnostic": _diagnostic_machine(d, etat, actions, subies, hist),
+    }
+
+
+def _diagnostic_machine(d: dict, etat: dict, actions: list, subies: list,
+                        hist: list) -> str:
+    """Le texte que copie le bouton « Copier le diagnostic ».
+
+    Sa raison d'être (Marion, 12/08/2026) : « si vraiment il y a un problème
+    que je ne comprends pas, je peux copier-coller un prompt et te le donner
+    pour l'arranger ». Il porte donc les MESSAGES BRUTS des fournisseurs, pas
+    leur traduction : c'est le brut qui permet de diagnostiquer, la
+    traduction n'est qu'une aide à la lecture.
+    """
+    L = [f"DIAGNOSTIC IAMÈTRE — {d['client_label']}",
+         f"Collecte lue : #{etat['run_id']} du {etat['run_date']}",
+         "",
+         "MACHINE",
+         f"  {etat['prochaine']}",
+         f"  Moteurs actifs : {len(etat['moteurs_actifs'])} "
+         f"({', '.join(etat['moteurs_actifs']) or 'aucun'})"]
+    if etat["moteurs_eteints"]:
+        L.append(f"  Moteurs éteints : {', '.join(etat['moteurs_eteints'])}")
+    L += [f"  Jeu de suivi : {etat['n_requetes']} requêtes, version {etat['set_version']}",
+          "",
+          "DERNIÈRE COLLECTE",
+          f"  {etat['appels']} appels, {etat['exploitables']} exploitables"
+          + (f", {etat['duree_min']} min" if etat["duree_min"] is not None else "")]
+    if etat["cout"] is not None:
+        L.append(f"  Coût rapporté par les fournisseurs : {etat['cout']:.2f} $"
+                 + (f" (hors {', '.join(etat['cout_muets'])}, qui ne le renvoient pas)"
+                    if etat["cout_partiel"] and etat["cout_muets"] else ""))
+
+    if actions or subies:
+        L += ["", "PANNES, MESSAGE BRUT DU FOURNISSEUR"]
+        for e in actions + subies:
+            if not e["messages"]:
+                L.append(f"  [{e['moteur_nom']}] {e['titre']} — {e['quoi_faire']}")
+                continue
+            L.append(f"  [{e['moteur_nom']}] ×{e['n']} — {e['titre']} "
+                     f"(verdict : {e['verdict']}, vu sur {e['recurrence']} collecte(s))")
+            L += [f"    {m}" for m in e["messages"]]
+    else:
+        L += ["", "PANNES : aucune."]
+
+    L += ["", "HISTORIQUE (25 dernières collectes)"]
+    for h in hist:
+        marque = " [hors série]" if h["hors_serie"] else ""
+        t = f"{h['taux']:.0f} %" if h["taux"] is not None else "—"
+        L.append(f"  #{h['id']} {h['date']} · {h['n']} appels · "
+                 f"{h['pannes']} panne(s) · {h['sans_reponse']} sans réponse · "
+                 f"{t}{marque}")
+    return "\n".join(L)
 
 
 def _brief(q: dict, d: dict) -> str:
@@ -628,6 +988,11 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
         # Le périmètre du taux : les moteurs AVEC recherche web uniquement.
         # La mémoire de marque garde sa carte, sur son propre axe.
         "n_moteurs": sum(1 for m in d["moteurs"] if m["recherche"]),
+        # La phrase du hero précise que la mémoire de marque est suivie SUR UN
+        # AUTRE AXE. Depuis qu'un moteur sans recherche peut être éteint
+        # (10/08/2026), cette précision ne doit sortir que s'il en reste un :
+        # sinon le tableau annonce un suivi qui n'existe plus.
+        "memoire_suivie": any(not m["recherche"] for m in d["moteurs"]),
         "titre": titre,
         "badge": badge,
         "phrase": phrase,
@@ -653,6 +1018,10 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
             tag = "objectif"
         s = sante_par_moteur.get(m["id"], {})
         moteurs.append({
+            # L'identifiant voyage avec le nom : la couche rendu en a besoin
+            # pour choisir la marque du moteur, et un logo ne se déduit pas
+            # d'un libellé traduisible.
+            "id": m["id"],
             "nom": NOMS_MOTEURS.get(m["id"], m["id"]),
             "taux": m["taux"],
             "est_zero": m["taux"] < 1,
@@ -792,7 +1161,8 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
                             if plus_haut is not None and plus_haut["rang"] else None),
             "muettes": partout,
         },
-        "colonnes": [{"nom_court": NOMS_COURTS.get(m["id"], m["id"]), "taux": m["taux"]}
+        "colonnes": [{"id": m["id"], "nom_court": NOMS_COURTS.get(m["id"], m["id"]),
+                      "taux": m["taux"]}
                      for m in d["moteurs"]],
         "lignes": lignes_mx,
     }
@@ -844,12 +1214,7 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
         },
     }
 
-    collectes = {
-        "n": len(d["historique"]),
-        "lignes": [{"id": h["id"], "date": h["date"], "n": h["n"],
-                    "erreurs": h["erreurs"], "taux": h["taux"], "note": h["note"]}
-                   for h in d["historique"]],
-    }
+    console = _console(d, _prochaine_collecte(date_du_jour))
 
     meta = {
         "produit_nom": d["produit"]["nom"],
@@ -867,4 +1232,4 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
             "voix": voix, "forteresses": forteresses, "dominance": dominance,
             "duel": duel, "courbe": courbe, "matrice": matrice,
             "alignement": alignement, "jeu_requetes": jeu_requetes,
-            "collectes": collectes}
+            "console": console}

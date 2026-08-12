@@ -31,7 +31,8 @@ def _delta(current: float | None, previous: float | None) -> str:
     return f"{diff:+.0f} pts"
 
 
-def run_summary(conn, run_id: int, exclure=(), avec_memoire: bool = False) -> dict:
+def run_summary(conn, run_id: int, exclure=(), avec_memoire: bool = False,
+                moteurs=None) -> dict:
     """`exclure` : ids des requêtes « en observation », tenues hors des
     agrégats pour qu'un test de requête ne fasse jamais bouger la série.
 
@@ -41,11 +42,19 @@ def run_summary(conn, run_id: int, exclure=(), avec_memoire: bool = False) -> di
     elle mesure la notoriété : la mémoire de marque vit sur son propre axe et
     ne s'additionne jamais au taux de visibilité (elle le sous-estimait de
     7 points). `avec_memoire=True` redonne les totaux de COLLECTE, tous
-    moteurs : à réserver aux compteurs d'appels, jamais à un taux."""
+    moteurs : à réserver aux compteurs d'appels, jamais à un taux.
+
+    `moteurs` : restreint le calcul à ces moteurs. Sert au tableau de bord, qui
+    ne montre que les moteurs encore activés dans la config — sans ça, un
+    moteur éteint continuerait d'alimenter les compteurs d'une vue où sa carte
+    n'apparaît plus, et les deux se contrediraient (10/08/2026)."""
     exclure = tuple(sorted(exclure))
     clause = f" AND prompt_id NOT IN ({','.join('?' * len(exclure))})" if exclure else ""
     if not avec_memoire:
         clause += " AND search_enabled=1"
+    moteurs = tuple(sorted(moteurs)) if moteurs is not None else ()
+    if moteurs:
+        clause += f" AND engine_id IN ({','.join('?' * len(moteurs))})"
     row = conn.execute(
         f"""
         SELECT COUNT(*) AS n,
@@ -55,7 +64,7 @@ def run_summary(conn, run_id: int, exclure=(), avec_memoire: bool = False) -> di
                AVG(text_position)            AS avg_position
         FROM responses WHERE run_id = ?{clause}
         """,
-        (run_id, *exclure),
+        (run_id, *exclure, *moteurs),
     ).fetchone()
     n, ok = row["n"] or 0, row["ok"] or 0
     return {

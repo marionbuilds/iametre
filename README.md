@@ -34,12 +34,20 @@ Puis on agrège en taux, et on rejoue chaque semaine pour obtenir une courbe.
 | Moteur | Ce qu'on interroge | Fidélité au produit grand public |
 |---|---|---|
 | `anthropic` | Claude + recherche web | proche |
-| `anthropic-memory` | Claude **sans** recherche | mesure la « mémoire de marque » |
 | `openai` | ChatGPT + recherche web | proche |
 | `perplexity` | API sonar | proche |
 | `ai_overview` | Google AI Overviews via DataForSEO | **exacte** (vraie SERP) |
+| `anthropic-memory` | Claude **sans** recherche | **éteint** depuis le 10/08/2026, voir ci-dessous |
 
-Le mode `anthropic-memory` interroge le modèle **sans recherche web**. Il ne mesure donc pas ce que le modèle trouve, mais ce qu'il sait : la marque est-elle connue sans aller la chercher ? C'est l'indicateur le plus lent à bouger de tous ceux suivis ici.
+### La mémoire de marque, et pourquoi elle n'est plus collectée chaque semaine
+
+Le mode `anthropic-memory` interroge le modèle **sans recherche web**. Il ne mesure donc pas ce que le modèle trouve, mais ce qu'il sait : la marque est-elle connue sans aller la chercher ? On n'y entre pas en optimisant son site, on y entre quand le reste du web parle de la marque.
+
+Il a été **éteint le 10 août 2026**, et la raison est une erreur de conception qui vaut d'être écrite : *le modèle interrogé est figé* — la règle « on ne change pas de modèle en cours de série » l'impose — **donc sa mémoire l'est aussi**. Ses poids ne bougent pas entre deux lundis. Les 30 appels hebdomadaires ne mesuraient aucune évolution : ils reconfirmaient une constante, 0 citation sur 30 à trois collectes complètes d'affilée.
+
+Ce n'est pas un indicateur hebdomadaire, c'est **un indicateur par version de modèle**. Il se rallume le jour où l'on veut comparer une nouvelle génération à celle-ci — pas avant. La métrique reste juste et reste rare : le raisonnement complet est en tête du bloc dans le YAML client, pour qu'il soit lu avant tout rallumage par réflexe.
+
+Ce que l'extinction change dans les chiffres, et ce qu'elle ne change pas : les 90 réponses déjà collectées **restent en base**, le taux de visibilité ne bouge pas d'un point (la mémoire n'y entrait déjà pas, elle vit sur son propre axe), seul le nombre d'appels par collecte passe de 255 à 225.
 
 ## Les attributs : ce que le modèle dit de la marque
 
@@ -67,7 +75,7 @@ Quatre limites, avant tout résultat. Un fait n'est cherché que dans les requê
 
 Deux règles de comptage héritées des attributs : jamais depuis une URL — un lien nommant la marque ne prouve pas que le modèle *dit* la bonne réponse —, et des bornes de mots strictes, pour qu'un sigle proche n'en valide pas un autre. Quand un terme de preuve est trop générique pour trancher seul, le fait déclare un contexte, et la preuve ne compte que dans une phrase qui le porte.
 
-Ce que ça donne, sur le suivi en cours : le moteur interrogé **sans recherche web** ne connaît aucun des faits déclarés — cohérent avec ce que mesure la « mémoire de marque », et c'est son prolongement : de « connaît-il la marque » à « connaît-il le domaine ».
+Ce que ça a donné, tant que le moteur sans recherche web était collecté : il ne connaissait **aucun** des faits déclarés — cohérent avec ce que mesurait la « mémoire de marque », et c'en était le prolongement : de « connaît-il la marque » à « connaît-il le domaine ».
 
 ## Les cinq garde-fous
 
@@ -84,9 +92,25 @@ Ce que ça donne, sur le suivi en cours : le moteur interrogé **sans recherche 
 
 **L'évolution n'est pas une cause.** Depuis le 07/08/2026, tout le site est balisé en entités : la série mesure donc un **avant-après**, pas une expérience contrôlée (celle qui avait été montée a été close sans résultat, sa trace est dans le YAML). Un avant-après ne démontre aucune causalité : une hausse peut venir du balisage, mais aussi de la saisonnalité BPJEPS (rentrée) ou d'une mise à jour des modèles interrogés. L'outil suit une évolution, il ne prouve pas une cause, et tout ce qui en est présenté doit le dire.
 
+## La console : une panne n'est pas un mauvais résultat
+
+Un instrument qui tourne tout seul toutes les semaines finit par tomber en panne tout seul aussi, et une panne d'API ressemble beaucoup à une chute de visibilité. La vue **Console** existe pour que les deux ne se confondent jamais — ni dans les chiffres, ni à l'œil.
+
+**Deux compteurs, jamais un seul.** Une **panne** (le fournisseur renvoie une erreur) et une **absence de réponse** (l'appel aboutit, la réponse est vide) sortent toutes les deux du dénominateur, mais elles n'appellent pas la même chose : la première se répare, la seconde est le comportement normal d'un moteur — Google n'affiche pas d'AI Overview sur toutes les requêtes. Les additionner sous une seule colonne « Erreurs », ce que faisait la version précédente, revenait à présenter un non-événement comme un incident.
+
+**Le message brut est traduit en verdict.** `HTTP 429: {'code': 'credit_balance_exhausted'}` et `tâche DataForSEO 40101: Internal SE Server Error` ne demandent pas la même chose : l'un une carte bancaire, l'autre rien du tout. Chaque message est rangé dans une famille qui porte le verdict — **à faire**, **subi**, ou **non répertorié** —, et seules les pannes réparables remontent dans « Ce que tu dois faire ». Une famille inconnue ne reçoit **aucun conseil inventé** : elle est signalée comme telle.
+
+> Un piège payé pour de bon : le message de crédits épuisés d'OpenAI est **servi en HTTP 429**. Testé dans le mauvais ordre, une panne sèche s'affiche en « limite de cadence, ça se dissipe tout seul » — et la collecte suivante est amputée à l'identique. L'ordre des familles est donc une contrainte de correction, pas un détail d'implémentation.
+
+**Le coût est affiché avec ses trous.** Perplexity et DataForSEO renvoient un coût en dollars, Anthropic et OpenAI ne renvoient que des jetons. Le total affiché ne couvre donc que ce qui est réellement rapporté, et **nomme les fournisseurs manquants** au lieu de se faire passer pour un total. Reconstituer les deux autres supposerait une grille de prix écrite en dur, qui vieillirait en silence et finirait par afficher un montant faux avec l'aplomb d'un montant vrai.
+
+**Les collectes hors série sont repliées, pas supprimées.** Une collecte qui a lancé moins d'appels qu'il n'y a de requêtes suivies n'a pas pu couvrir le jeu : essai de mise au point ou interruption, elle n'est pas comparable aux autres. Elle garde sa ligne datée — un garde-fou du lanceur s'appuie dessus — mais elle ne se lit plus au même rang qu'une vraie collecte.
+
+Enfin, un bouton **« Copier le diagnostic »** exporte l'état de la machine et les messages bruts en texte, pour les coller ailleurs sans avoir à ouvrir la base.
+
 ## Limite assumée
 
-Les moteurs 1 à 4 interrogent des **modèles via API**, pas les **interfaces** grand public. Les écarts viennent du system prompt du produit, de la personnalisation et du routage. Cet écart existe, donc il est calibré : **une requête témoin par mois, posée à la main dans la vraie interface**, et l'écart consigné dans le journal.
+Tous les moteurs sauf Google AI Overviews interrogent des **modèles via API**, pas les **interfaces** grand public. Les écarts viennent du system prompt du produit, de la personnalisation et du routage. Cet écart existe, donc il est calibré : **une requête témoin par mois, posée à la main dans la vraie interface**, et l'écart consigné dans le journal.
 
 ## Installation
 

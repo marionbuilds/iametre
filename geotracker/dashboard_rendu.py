@@ -34,6 +34,100 @@ def _e(v) -> str:
     return html.escape(str(v), quote=True)
 
 
+# ------------------------------------------------------------ marques moteurs
+#
+# Les logos sont écrits EN DUR, en SVG, et jamais chargés depuis un CDN : le
+# fichier doit s'ouvrir hors ligne (règle de DA), et un logo qui ne charge pas
+# casse la lecture d'une carte dont il est le point d'entrée visuel.
+#
+# Les couleurs de marque sont assumées (Marion, 10/08/2026) : c'est la forme
+# ET la couleur qui font qu'on trouve son moteur sans lire. Le reste de la
+# carte — chiffre, barre, texte — reste dans l'univers de verts.
+#
+# ⚠️ Fidélité : ChatGPT et le « G » de Google sont les tracés officiels.
+# L'étoile de Claude et la marque Perplexity sont des APPROXIMATIONS dessinées
+# ici, reconnaissables mais pas au pixel près. Si un jour ce tableau part chez
+# un client, il faudra les remplacer par les fichiers officiels.
+#
+# `--mark-openai` et `--mark-pplx` basculent avec le thème (noir illisible sur
+# fond sombre, turquoise trop sourd) : ils sont définis dans les trois blocs de
+# variables, comme toutes les autres couleurs.
+
+_LOGO_OPENAI = (
+    '<svg viewBox="0 0 24 24" fill="var(--mark-openai)" aria-hidden="true"><path d="M22.2819 '
+    '9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 '
+    '4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 '
+    '0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 '
+    '0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 '
+    '0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 '
+    '4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 '
+    '.038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 '
+    '1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804'
+    ' 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 '
+    '0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 '
+    '1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 '
+    '7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 '
+    '0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 '
+    '9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 '
+    '4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 '
+    '7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 '
+    '2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>'
+)
+
+# Étoile de Claude : huit rayons effilés, de longueurs alternées — c'est
+# l'inégalité des rayons qui la distingue d'un astérisque quelconque.
+_LOGO_CLAUDE = (
+    '<svg viewBox="0 0 24 24" fill="#D97757" aria-hidden="true"><path d="M13.50 10.50 L12.42 1.20 '
+    'L11.58 1.20 L10.50 10.50ZM14.12 12.00 L17.53 7.06 L16.94 6.47 L12.00 9.88ZM13.50 13.50 '
+    'L22.20 12.42 L22.20 11.58 L13.50 10.50ZM12.00 14.12 L16.94 17.53 L17.53 16.94 L14.12 '
+    '12.00ZM10.50 13.50 L11.58 22.80 L12.42 22.80 L13.50 13.50ZM9.88 12.00 L6.47 16.94 L7.06 '
+    '17.53 L12.00 14.12ZM10.50 10.50 L1.80 11.58 L1.80 12.42 L10.50 13.50ZM12.00 9.88 L7.06 6.47 '
+    'L6.47 7.06 L9.88 12.00Z"/></svg>'
+)
+
+# Perplexity : au trait, parce que la marque est faite de traits. Épaisseur
+# 1,9 et non 1,7 : à 19 px, en dessous, les six segments se referment en pâté
+# (constaté à l'écran le 10/08, deux autres pistes écartées pour ça).
+_LOGO_PERPLEXITY = (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="var(--mark-pplx)" stroke-width="1.9" '
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<path d="M12 2.2 V21.8"/><path d="M4 8.2 H20 V15.8 H4 Z"/>'
+    '<path d="M12 8.2 L5.4 3.2"/><path d="M12 8.2 L18.6 3.2"/>'
+    '<path d="M12 15.8 L5.4 20.8"/><path d="M12 15.8 L18.6 20.8"/></svg>'
+)
+
+_LOGO_GOOGLE = (
+    '<svg viewBox="0 0 48 48" aria-hidden="true">'
+    '<path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 '
+    '14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>'
+    '<path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 '
+    '5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>'
+    '<path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C'
+    '.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>'
+    '<path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 '
+    '2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>'
+)
+
+# `anthropic-memory`, c'est Claude sans recherche : même modèle, même marque.
+# Deux cartes portent donc la même étoile, et ce sont leurs titres qui les
+# séparent (« Claude » et « Claude · mémoire de marque »).
+LOGOS = {
+    "openai": _LOGO_OPENAI,
+    "anthropic": _LOGO_CLAUDE,
+    "anthropic-memory": _LOGO_CLAUDE,
+    "perplexity": _LOGO_PERPLEXITY,
+    "ai_overview": _LOGO_GOOGLE,
+}
+
+
+def _logo(moteur_id: str, classe: str) -> str:
+    """La marque d'un moteur, ou rien du tout. Un moteur inconnu (v2 : Mistral,
+    Grok) ne casse pas la mise en page : il s'affiche sans logo, avec son nom.
+    """
+    svg = LOGOS.get(moteur_id)
+    return f'<span class="{classe}">{svg}</span>' if svg else ""
+
+
 CSS = """
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -45,6 +139,7 @@ CSS = """
   --lime:#CDE9A5; --piste:#EDF3E2;
   --alert:#C14E24; --alert-soft:#F8E9E0;
   --opp:#8A6100; --opp-soft:#F6EFD3; --r:16px;
+  --mark-openai:#0B0B0B; --mark-pplx:#20808D;
   --f-display:system-ui,-apple-system,"Segoe UI",sans-serif;
   --f-body:system-ui,-apple-system,"Segoe UI",sans-serif;
   --f-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
@@ -57,6 +152,7 @@ CSS = """
   --lime:#B7DC85; --piste:#1E2B20;
   --alert:#E5764A; --alert-soft:rgba(229,118,74,.14);
   --opp:#E0A72E; --opp-soft:rgba(224,167,46,.13);
+  --mark-openai:#E9F2E3; --mark-pplx:#3FB4C4;
 }}
 :root[data-theme="dark"]{
   --ink:#E9F2E3; --ink-soft:rgba(233,242,227,.66); --ink-faint:rgba(233,242,227,.42);
@@ -66,6 +162,7 @@ CSS = """
   --lime:#B7DC85; --piste:#1E2B20;
   --alert:#E5764A; --alert-soft:rgba(229,118,74,.14);
   --opp:#E0A72E; --opp-soft:rgba(224,167,46,.13);
+  --mark-openai:#E9F2E3; --mark-pplx:#3FB4C4;
 }
 body{font-family:var(--f-body); background:var(--bg); color:var(--ink); line-height:1.55;
   -webkit-font-smoothing:antialiased}
@@ -322,7 +419,18 @@ button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-fore
   gap:14px}
 .eng{background:var(--paper); border:1px solid var(--line); border-radius:var(--r);
   padding:18px 20px}
-.eng h3{font-size:.9rem; font-weight:700; margin-bottom:2px}
+/* La marque du moteur AVANT son nom : sur des cartes toutes identiques, c'est
+   elle qui sert de point d'entrée, on trouve son moteur sans lire.
+   `flex:none` sur le logo, et `flex-start` plutôt que `center` : un nom de
+   moteur peut tenir sur deux lignes, et un logo centré sur deux lignes flotte
+   entre les deux au lieu d'introduire la première. */
+.eng__hd{display:flex; align-items:flex-start; gap:8px; margin-bottom:2px}
+.eng__logo{width:19px; height:19px; flex:none; line-height:0; margin-top:1px}
+.eng__logo svg{width:100%; height:100%; display:block}
+.eng h3{font-size:.9rem; font-weight:700}
+/* Un moteur à 0 % : la marque s'efface avec le reste de la carte, sinon elle
+   crie plus fort que le chiffre qu'elle est censée introduire. */
+.eng--zero .eng__logo{opacity:.42}
 .eng__rate{font-family:var(--f-mono); font-weight:700; font-size:1.7rem; letter-spacing:-.03em;
   margin-bottom:8px}
 .eng__bar{height:7px; border-radius:99px; background:var(--piste); overflow:hidden;
@@ -342,7 +450,6 @@ button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-fore
 .eng__meta{font-family:var(--f-mono); font-size:.72rem; color:var(--ink-faint);
   margin-bottom:8px}
 .eng__meta b{color:var(--ink-soft)}
-.eng__warn{color:var(--alert); font-weight:700}
 
 /* Matrice moteur x requete : le croisement, la ou se lisent les decisions. */
 .mx{overflow-x:auto}
@@ -353,6 +460,10 @@ table.mx__t th,table.mx__t td{padding:7px 8px; border-bottom:1px solid var(--lin
 table.mx__t thead th{font-size:.7rem; font-weight:700; color:var(--ink-faint);
   letter-spacing:.07em; text-transform:uppercase; text-align:center; white-space:nowrap;
   vertical-align:bottom; padding-bottom:9px}
+/* Même repère que sur les cartes, en plus petit : la matrice a cinq colonnes
+   aux libellés courts, le logo les distingue avant la lecture. */
+.mx__logo{display:block; width:16px; height:16px; margin:0 auto 5px; line-height:0}
+.mx__logo svg{width:100%; height:100%; display:block}
 table.mx__t thead th small{display:block; font-family:var(--f-mono); font-size:.78rem;
   color:var(--ink-soft); letter-spacing:0; text-transform:none; margin-top:3px}
 /* vertical-align:top : « Requête » s'aligne sur la ligne des NOMS de moteurs
@@ -405,6 +516,55 @@ table.d td.n{font-family:var(--f-mono); white-space:nowrap}
    identifiants (Réf.) et les dates restent à gauche : on ne les compare pas. */
 table.d th.num,table.d td.num{text-align:right}
 table.d tr:last-child td{border-bottom:none}
+
+/* Console (12/08/2026). Deux choix de couleur, tous les deux volontaires :
+   les cartes d'action portent l'AMBRE (--opp), pas le rouge — une tâche à
+   faire n'est pas un incident, et le rouge venait d'être retiré des cartes
+   moteur pour cette raison exacte. Le journal, lui, reste entièrement neutre :
+   une panne archivée ne demande plus rien. */
+.conshd{display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:18px}
+.conshd .btn--ghost{border-color:var(--line); background:var(--paper); color:var(--ink)}
+.conshd__aide{font-size:.78rem; color:var(--ink-faint); max-width:52ch}
+.card+.card{margin-top:18px}
+.card--todo{border-left:3px solid var(--opp)}
+.vide{font-size:.9rem; color:var(--ink-soft); background:var(--data-soft);
+  border-radius:12px; padding:14px 16px; margin-top:8px}
+.todo{background:var(--opp-soft); border-radius:14px; padding:16px 18px; margin-top:12px}
+.todo__hd{display:flex; align-items:baseline; justify-content:space-between; gap:12px}
+.todo__hd h3{font-size:.98rem; font-weight:700; color:var(--opp)}
+.todo__recur{flex:none; font-size:.7rem; font-weight:700; text-transform:uppercase;
+  letter-spacing:.07em; color:var(--opp)}
+.todo__qui{font-family:var(--f-mono); font-size:.74rem; color:var(--ink-faint);
+  margin:2px 0 8px}
+.todo p{font-size:.86rem; color:var(--ink-soft)}
+.todo__lien{display:inline-block; margin-top:9px; font-family:var(--f-mono);
+  font-size:.76rem; color:var(--data-deep); word-break:break-all}
+.subi{list-style:none; display:grid; gap:12px; margin-top:12px}
+.subi li{font-size:.85rem; color:var(--ink-soft); background:var(--piste);
+  border-radius:12px; padding:13px 16px}
+.subi strong{color:var(--ink)}
+/* Le brut est REPLIÉ, jamais absent : c'est lui qui permet de diagnostiquer,
+   mais il ne doit pas occuper la place de la phrase qui dit quoi faire. */
+.brut{margin-top:9px}
+.brut summary{font-size:.74rem; font-weight:600; color:var(--ink-faint); cursor:pointer}
+.brut summary:focus-visible{outline:3px solid var(--data-deep); outline-offset:2px}
+.brut pre{margin-top:7px; padding:10px 12px; background:var(--piste); border-radius:9px;
+  font-family:var(--f-mono); font-size:.72rem; color:var(--ink-soft);
+  white-space:pre-wrap; word-break:break-word}
+.mach{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-top:12px}
+.mach__c{background:var(--piste); border-radius:12px; padding:14px 16px}
+.mach__c b{display:block; font-family:var(--f-mono); font-size:1.02rem; font-weight:700}
+.mach__c span{display:block; font-size:.76rem; color:var(--ink-soft); margin-top:4px}
+.mach__off{color:var(--ink-faint)}
+/* Hors série : replié, pas supprimé. Une collecte qui n'a pas couvert le jeu
+   reste une ligne du registre (garde-fou --sauf-si-recente), elle ne doit
+   simplement pas se lire au même rang qu'une vraie collecte. */
+.hors{margin-top:16px; border-top:1px solid var(--line); padding-top:14px}
+.hors summary{font-size:.8rem; color:var(--ink-faint); cursor:pointer; max-width:62ch}
+.hors summary:focus-visible{outline:3px solid var(--data-deep); outline-offset:2px}
+.hors table.d{margin-top:10px; opacity:.7}
+@media(max-width:1020px){.mach{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:560px){.mach{grid-template-columns:1fr}}
 
 [hidden]{display:none!important}
 @media(max-width:1020px){
@@ -666,8 +826,9 @@ def _hero(h: dict) -> str:
       <h2>{h["titre"]}{badge}</h2>
       <p class="eyebrow">Visibilité IA</p>
       <p>{f'Mesuré sur <strong>{h["appels_reussis"]} appels réussis</strong>, {h["n_moteurs"]} moteurs '
-          f'avec recherche web ; la mémoire de marque (moteur sans recherche) est suivie à part, '
-          f'hors de ce taux. ' if h["mesurable"] else ''}{_e(h["phrase"])}</p>
+          f'avec recherche web' + (' ; la mémoire de marque (moteur sans recherche) est suivie à '
+          'part, hors de ce taux' if h["memoire_suivie"] else '') + '. '
+          if h["mesurable"] else ''}{_e(h["phrase"])}</p>
       {sante_html}
     </div>
     {ruler}
@@ -683,13 +844,15 @@ def _moteurs(moteurs: list) -> str:
         # ne vaut pas citée rarement mais en 1re. Les deux, côte à côte.
         rang = (f'rang moyen <b>{_nb(m["rang"])}</b>' if m["rang"]
                 else '<b>aucune citation</b>')
-        a = m["appels"]
-        appels = f'{a["ok"]} appels'
-        if a["en_erreur"]:
-            appels = (f'<span class="eng__warn">{a["ok"]}/{a["total"]} appels, '
-                      f'{a["erreurs"]} échec{"s" if a["erreurs"] > 1 else ""}</span>')
+        # Les échecs ne sont PLUS sur la carte (Marion, 12/08/2026). En rouge
+        # et en gras à côté du taux, ils faisaient lire un incident de
+        # facturation comme un mauvais résultat de visibilité — deux sujets
+        # sans rapport, dont un seul appartient à cette carte. Ils vivent
+        # maintenant dans la vue Console, où ils portent une action.
+        appels = f'{m["appels"]["ok"]} appels'
         eng += (f'<article class="eng{" eng--zero" if m["est_zero"] else ""}">'
-                f'<h3>{_e(m["nom"])}</h3>'
+                f'<div class="eng__hd">{_logo(m["id"], "eng__logo")}'
+                f'<h3>{_e(m["nom"])}</h3></div>'
                 f'<div class="eng__rate">{m["taux"]:.0f} %</div>'
                 f'<div class="eng__bar"><i style="width:{max(m["taux"], 2):.0f}%"></i></div>'
                 f'<div class="eng__meta">{rang} · {appels}</div>'
@@ -956,7 +1119,8 @@ def _matrice(mx: dict) -> str:
     apparaîtra à la première collecte réussie.</p>
   </section>"""
     entetes = "".join(
-        f'<th>{_e(col["nom_court"])}<small>{col["taux"]:.0f} %</small></th>'
+        f'<th>{_logo(col["id"], "mx__logo")}{_e(col["nom_court"])}'
+        f'<small>{col["taux"]:.0f} %</small></th>'
         for col in mx["colonnes"]
     )
     classes = {"zero": "mx--0", "low": "mx--low", "mid": "mx--mid",
@@ -1152,22 +1316,163 @@ def _vue_requetes(j: dict) -> str:
   <script type="application/json" id="req-donnees">{donnees_js}</script></section>"""
 
 
-def _vue_collectes(c: dict) -> str:
+def _vue_console(c: dict) -> str:
+    """La vue Console : ce qu'il y a à faire, l'état de la machine, le journal.
+
+    L'ordre n'est pas décoratif. L'ancienne vue « Collectes » présentait le
+    journal en premier et ne proposait aucune action ; Marion l'a décrite le
+    12/08/2026 comme inutilisable (« je ne sais pas quelle action je dois
+    faire »). Ce qui se décide passe donc devant ce qui s'archive.
+    """
+    e = c["etat"]
+
+    # --- Bloc 1 : ce que tu dois faire.
+    if c["actions"]:
+        cartes = ""
+        for a in c["actions"]:
+            recur = ""
+            if a["recurrence"] > 1:
+                recur = (f'<span class="todo__recur">vue sur {a["recurrence"]} '
+                         f'collectes</span>')
+            portee = (f'{a["n"]} appel{"s" if a["n"] > 1 else ""} perdu'
+                      f'{"s" if a["n"] > 1 else ""}' if a["n"] else "collecte amputée")
+            lien = ""
+            if a["lien"]:
+                lien = (f'<a class="todo__lien" href="{_e(a["lien"])}" target="_blank" '
+                        f'rel="noopener">{_e(a["lien"])}</a>')
+            brut = ""
+            if a["messages"]:
+                # TOUS les messages de la famille, pas le premier : deux pannes
+                # rangées ensemble peuvent porter deux codes différents, et
+                # c'est justement le code qui sert à diagnostiquer.
+                s = "s" if len(a["messages"]) > 1 else ""
+                brut = (f'<details class="brut"><summary>Message{s} brut{s} du '
+                        f'fournisseur</summary>'
+                        + "".join(f'<pre>{_e(m)}</pre>' for m in a["messages"])
+                        + '</details>')
+            cartes += (f'<article class="todo">'
+                       f'<div class="todo__hd"><h3>{_e(a["titre"])}</h3>{recur}</div>'
+                       f'<p class="todo__qui">{_e(a["moteur_nom"])} · {portee}</p>'
+                       f'<p>{_e(a["quoi_faire"])}</p>{lien}{brut}</article>')
+        bloc_actions = f"""<section class="card card--todo">
+  <div class="card__head"><h2>Ce que tu dois faire</h2>
+    <span class="card__hint">{len(c['actions'])} en attente</span></div>
+  <p class="card__lead">Déduit des pannes de la dernière collecte. Ce qui n'est pas
+  réparable de ton côté n'apparaît pas ici : c'est plus bas, dans « Subi ».</p>
+  {cartes}</section>"""
+    else:
+        bloc_actions = """<section class="card card--todo">
+  <div class="card__head"><h2>Ce que tu dois faire</h2></div>
+  <p class="vide">Rien à faire. La machine tourne, la dernière collecte n'a demandé
+  aucune intervention.</p></section>"""
+
+    # --- « Subi » : ce qui a cassé sans que personne puisse rien y faire. Le
+    # dire explicitement, plutôt que de le taire, c'est ce qui empêche de
+    # rouvrir le sujet chaque lundi.
+    bloc_subi = ""
+    if c["subies"]:
+        lignes = "".join(
+            f'<li><strong>{_e(s["moteur_nom"])}</strong> · {_e(s["titre"])} '
+            f'({s["n"]} appel{"s" if s["n"] > 1 else ""}'
+            + (f', vu sur {s["recurrence"]} collectes' if s["recurrence"] > 1 else '')
+            + f') — {_e(s["quoi_faire"])}'
+            f'<details class="brut"><summary>Message brut</summary>'
+            + "".join(f'<pre>{_e(m)}</pre>' for m in s["messages"])
+            + '</details></li>'
+            for s in c["subies"])
+        bloc_subi = f"""<section class="card">
+  <div class="card__head"><h2>Subi, rien à faire</h2></div>
+  <ul class="subi">{lignes}</ul></section>"""
+
+    # --- Bloc 2 : l'état de la machine.
+    eteints = (f' <span class="mach__off">+ {len(e["moteurs_eteints"])} éteint : '
+               f'{_e(", ".join(e["moteurs_eteints"]))}</span>'
+               if e["moteurs_eteints"] else "")
+    duree = f'{e["duree_min"]} min' if e["duree_min"] is not None else "durée inconnue"
+    if e["cout"] is None:
+        cout = ('<b>non communiqué</b><span>aucun fournisseur de cette collecte '
+                'ne renvoie de coût</span>')
+    else:
+        muets = (f'hors {_e(", ".join(e["cout_muets"]))}, qui ne le renvoient pas'
+                 if e["cout_partiel"] and e["cout_muets"]
+                 else "coût rapporté par les fournisseurs")
+        cout = f'<b>{_nb(e["cout"], 2)} $</b><span>{muets}</span>'
+    bloc_etat = f"""<section class="card">
+  <div class="card__head"><h2>L'état de la machine</h2>
+    <span class="card__hint">{_e(e['prochaine'])}</span></div>
+  <div class="mach">
+    <div class="mach__c"><b>{e['n_moteurs_actifs']} moteurs</b>
+      <span>{_e(', '.join(e['moteurs_actifs']))}{eteints}</span></div>
+    <div class="mach__c"><b>{e['n_requetes']} requêtes</b>
+      <span>jeu de suivi version {e['set_version']}</span></div>
+    <div class="mach__c"><b>collecte #{e['run_id']}</b>
+      <span>{_e(e['run_date'])} · {duree} · {e['appels']} appels dont
+        {e['exploitables']} exploitables</span></div>
+    <div class="mach__c">{cout}</div>
+  </div></section>"""
+
+    # --- Bloc 3 : le journal. Un ARCHIVE, pas un poste de travail : aucune
+    # ligne ne porte d'action, donc aucune ne se déplie. Les messages bruts de
+    # la collecte lue sont dans les blocs du dessus, ceux des collectes
+    # passées dans le diagnostic copiable — les remettre ici mettait six
+    # pavés de code dans une colonne de chiffres alignée à droite.
     def ligne(h):
         t = f'{h["taux"]:.0f} %' if h["taux"] is not None else "—"
+        cout = f'{_nb(h["cout"], 2)} $' if h["cout"] is not None else "—"
+        # Le détail des pannes en infobulle : présent pour qui le cherche,
+        # absent de la mise en page pour qui ne le cherche pas.
+        titre = ""
+        if h["detail"]:
+            titre = ' title="' + _e(" · ".join(
+                f'{x["moteur"]} ×{x["n"]} : {x["famille"]}' for x in h["detail"])) + '"'
         return (f'<tr><td class="n">#{h["id"]}</td><td class="n">{_e(h["date"])}</td>'
-                f'<td class="n num">{h["n"]}</td><td class="n num">{h["erreurs"] or "—"}</td>'
+                f'<td class="n num">{h["n"]}</td>'
+                f'<td class="n num"{titre}>{h["pannes"] or "—"}</td>'
+                f'<td class="n num">{h["sans_reponse"] or "—"}</td>'
+                f'<td class="n num">{cout}</td>'
                 f'<td class="n num">{t}</td><td>{_e(h["note"])}</td></tr>')
 
-    return f"""<section class="card">
-  <div class="card__head"><h2>Collectes</h2>
-    <span class="card__hint">{c['n']} enregistrées</span></div>
+    entete = ('<tr><th>Réf.</th><th>Date</th><th class="num">Appels</th>'
+              '<th class="num">Pannes</th><th class="num">Sans réponse</th>'
+              '<th class="num">Coût</th><th class="num">Citation</th><th>Note</th></tr>')
+    serie = [h for h in c["journal"]["lignes"] if not h["hors_serie"]]
+    hors = [h for h in c["journal"]["lignes"] if h["hors_serie"]]
+
+    # Les essais de mise au point sont REPLIÉS, pas supprimés : ils gardent
+    # leur ligne datée (le garde-fou --sauf-si-recente s'appuie dessus) mais
+    # ils ne se lisent plus au même rang que les vraies collectes. Sans ce
+    # repli, 13 lignes de 3 appels noyaient les 3 collectes réelles.
+    replie = ""
+    if hors:
+        replie = (f'<details class="hors"><summary>{len(hors)} collecte'
+                  f'{"s" if len(hors) > 1 else ""} hors série : moins d\'appels que '
+                  f'de requêtes suivies, donc sans couverture du jeu — essais de mise '
+                  f'au point ou collecte interrompue</summary>'
+                  f'<div class="tw"><table class="d">{entete}'
+                  f'{"".join(ligne(h) for h in hors)}</table></div></details>')
+
+    bloc_journal = f"""<section class="card">
+  <div class="card__head"><h2>Le journal des collectes</h2>
+    <span class="card__hint">{len(serie)} collecte{"s" if len(serie) > 1 else ""}
+      de la série{f" · {len(hors)} hors série" if hors else ""}</span></div>
   <p class="card__lead">Chaque collecte interroge tous les moteurs sur toutes les requêtes,
   plusieurs fois. <strong>Les réponses brutes sont conservées horodatées</strong> : les taux se
-  recalculent, une réponse perdue ne se rattrape pas.</p>
-  <div class="tw"><table class="d">
-  <tr><th>Réf.</th><th>Date</th><th class="num">Appels</th><th class="num">Erreurs</th><th class="num">Citation</th><th>Note</th></tr>
-  {''.join(ligne(h) for h in c['lignes'])}</table></div></section>"""
+  recalculent, une réponse perdue ne se rattrape pas.
+  <br><strong>Pannes</strong> : le fournisseur a renvoyé une erreur, c'est réparable.
+  <strong>Sans réponse</strong> : l'appel a abouti mais la réponse est vide, typiquement
+  une requête où Google n'affiche pas d'AI&nbsp;Overview. Les deux sortent du taux,
+  une seule demande quelque chose. <em>Les additionner, comme le faisait l'ancienne
+  colonne « Erreurs », faisait passer un comportement normal pour un incident.</em></p>
+  <div class="tw"><table class="d">{entete}
+  {''.join(ligne(h) for h in serie)}</table></div>{replie}</section>"""
+
+    return f"""<div class="conshd">
+  <button class="btn--ghost" data-copy="{_e(c['diagnostic'])}"
+          data-ok="Diagnostic copié">Copier le diagnostic</button>
+  <span class="conshd__aide">Colle-le dans une conversation avec Claude : il contient
+    l'état de la machine et les messages bruts des fournisseurs.</span>
+</div>
+{bloc_actions}{bloc_subi}{bloc_etat}{bloc_journal}"""
 
 
 # ------------------------------------------------------------------ la page
@@ -1208,11 +1513,14 @@ def rendu(d: dict) -> str:
         <circle cx="5.6" cy="10.4" r="1.05" fill="currentColor"/>
         <circle cx="10.4" cy="10.4" r="1.05" fill="currentColor"/></svg><span>Requêtes</span></button>
     <button class="nav" role="tab" aria-selected="false" aria-controls="v-col"
-            title="Collectes" aria-label="Collectes">
+            title="Console" aria-label="Console">
       <svg width="19" height="19" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.7"/>
-        <path d="M8 4.5 L8 8 L10.6 9.6" stroke="currentColor" stroke-width="1.7"
-              stroke-linecap="round"/></svg><span>Collectes</span></button>
+        <rect x="1.8" y="2.8" width="12.4" height="10.4" rx="2" stroke="currentColor"
+              stroke-width="1.6"/>
+        <path d="M4.8 6.6 L6.8 8 L4.8 9.4" stroke="currentColor" stroke-width="1.6"
+              stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M8.6 10 H11" stroke="currentColor" stroke-width="1.6"
+              stroke-linecap="round"/></svg><span>Console</span></button>
   </aside>
   <main class="main">
     <div class="print-head"><strong>{_e(m['produit_nom'])} · {_e(m['client_label'])}</strong>
@@ -1252,7 +1560,7 @@ def rendu(d: dict) -> str:
     <div id="v-mot" role="tabpanel" hidden>{_vue_moteurs_sujets(d)}</div>
     <div id="v-cit" role="tabpanel" hidden>{_vue_citations(d)}</div>
     <div id="v-req" role="tabpanel" hidden>{_vue_requetes(d["jeu_requetes"])}</div>
-    <div id="v-col" role="tabpanel" hidden>{_vue_collectes(d["collectes"])}</div>
+    <div id="v-col" role="tabpanel" hidden>{_vue_console(d["console"])}</div>
   </main>
 </div>
 <style>{CSS}</style>

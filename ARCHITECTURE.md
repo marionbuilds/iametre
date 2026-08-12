@@ -13,7 +13,8 @@
 > **5 vues à libellés visibles** : Vue d'ensemble (hero avec règle graduée, moteurs,
 > À faire, duel, voix + stats, forteresses + dominance, courbe en dernier) ·
 > Moteurs et sujets (matrice) · Ce que les IA citent chez toi (alignement) ·
-> Requêtes (compteurs + formulaire) · Collectes. Acquis : `pages_resume` supprimé,
+> Requêtes (compteurs + formulaire) · **Console** *(ex-« Collectes », restructurée
+> le 12/08/2026 — voir §3.15)*. Acquis : `pages_resume` supprimé,
 > mission + articles fusionnés en « À faire » (contexte et brief OPTIONNELS, portés
 > par l'entrée n°1 : une fusion ne supprime pas de fonctionnalité), tableau des
 > requêtes fusionné dans la matrice. Les tables du §3 reflètent cet état.
@@ -214,12 +215,47 @@ alimente un brouillon localStorage (avertissement de fragilité affiché), le bo
 validation-restauration, plafond, commit-push proposé). Le lien vers les issues
 GitHub a été supprimé : c'était le contournement.
 
-### 3.15 `collectes` — vue « Collectes »
+### 3.15 `console` — vue « Console » (ex-« Collectes », restructurée le 12/08/2026)
+
+La vue se lisait dans l'ordre de la machine : un registre de 25 lignes, une colonne
+« Erreurs », aucune action. Elle se lit maintenant dans l'ordre de l'utilisatrice —
+**ce qu'il y a à faire, l'état de la machine, le journal en dernier**.
+
+⚠️ Deux invariants de cette section, tous les deux issus de corrections de faux :
+
+1. **Les pannes et les absences de réponse ne s'additionnent jamais.** Les deux
+   sortent d'`EXPLOITABLE`, mais une panne se répare et une réponse vide est un
+   comportement normal de moteur. L'ancien champ `erreurs` les confondait.
+2. **Les compteurs sont restreints aux moteurs ACTIFS**, comme tous les autres
+   compteurs de la page : un moteur éteint garde ses réponses en base mais sort du
+   tableau de bord entièrement (§ moteurs).
 
 | Champ | Type | Provenance actuelle |
 |---|---|---|
-| `n` | int | `len(historique)` |
-| `lignes` | list | 25 max, plus récentes d'abord : `[{id: int, date: str "2026-08-03 à 09:21", n: int, erreurs: int, taux: float\|null, note: str}]` — les « — » (erreurs 0, taux null) restent des choix d'affichage du render |
+| `actions` | list | pannes de la collecte lue, groupées par (famille, moteur), verdict `action` ou `inconnu` uniquement : `[{cle, titre, verdict, quoi_faire, moteur, moteur_nom, lien, n: int, messages: [str], recurrence: int}]`. Une collecte interrompue (moteur configuré jamais appelé) s'y insère en tête sans message brut |
+| `subies` | list | même forme, verdict `subir` : incidents fournisseur, affichés à part et sans action |
+| `etat` | dict | `{prochaine, n_moteurs_actifs, moteurs_actifs: [str], moteurs_eteints: [str], n_requetes, set_version, run_id, run_date, duree_min: int\|null, appels, exploitables, cout: float\|null, cout_partiel: bool, cout_muets: [str]}` |
+| `journal` | dict | `{n, n_hors_serie, lignes: [{id, date, n, pannes, sans_reponse, taux: float\|null, note, hors_serie: bool, cout: float\|null, detail: [{moteur, n, message, famille}]}]}`, 25 max, plus récentes d'abord |
+| `diagnostic` | str | texte brut copiable : état de la machine, messages **bruts** des fournisseurs, historique. C'est le brut qui diagnostique, la traduction n'est qu'une aide à la lecture |
+
+**Le verdict vient de `FAMILLES_PANNE`**, table module-level de `dashboard_donnees.py`
+qui traduit un message brut en famille. **Son ordre est une contrainte de
+correction** : le message de crédits épuisés d'OpenAI est servi en HTTP 429, donc
+`credits` doit être testé avant `cadence`, sinon une panne sèche s'affiche en
+« ça se dissipe tout seul ». Un message non reconnu tombe dans `FAMILLE_INCONNUE`,
+qui ne propose **aucun conseil** : elle renvoie au diagnostic.
+
+**Le coût est partiel par construction.** `_cout_appel()` ne lit que le coût
+**rapporté** par le fournisseur (`cost` chez DataForSEO, `cost.total_cost` chez
+Perplexity) ; Anthropic et OpenAI ne renvoient que des jetons. Aucune grille de prix
+n'est écrite en dur : `cout_partiel` et `cout_muets` disent au render de nommer les
+manquants plutôt que d'afficher un faux total.
+
+**`hors_serie` se déduit, il ne se devine pas** : une collecte qui a lancé moins
+d'appels qu'il n'y a de requêtes titulaires n'a pas pu couvrir le jeu. Essai de mise
+au point ou interruption, on ne tranche pas — dans les deux cas la ligne n'est pas
+comparable, et le render la replie sans la supprimer (le garde-fou
+`--sauf-si-recente` s'appuie sur ces lignes datées).
 
 ## 4. Ce qui disparaît du dictionnaire actuel
 
@@ -244,7 +280,7 @@ Déterminisme (amendement n°2) : `donnees()` étant une fonction pure de `(base
 3. **Échappement HTML** : couche render, au moment de l'insertion.
 4. **Horloge** : jamais lue par la couche data ; `date_du_jour` est un paramètre (amendement n°2, §2 bis).
 5. **Noms de fichiers** : `dashboard_donnees.py` / `dashboard_rendu.py`, `dashboard.py` point d'entrée. (Validés tels quels.)
-6. **Une fonction render par bloc** (état après Passe 1 corrigée) : `_hero`, `_moteurs`, `_a_faire`, `_voix`, `_forteresses`, `_dominance`, `_duel`, `_courbe`, `_matrice`, `_alignement`, `_vue_requetes`, `_vue_collectes`, plus les composeurs `_vue_ensemble`, `_vue_moteurs_sujets`, `_vue_citations` et la coquille `rendu()` (rail à 5 boutons, libellés visibles). Chacune reçoit sa portion du dictionnaire et rien d'autre ; chacune est appelable avec un dictionnaire écrit à la main, sans base présente.
+6. **Une fonction render par bloc** (état après Passe 1 corrigée) : `_hero`, `_moteurs`, `_a_faire`, `_voix`, `_forteresses`, `_dominance`, `_duel`, `_courbe`, `_matrice`, `_alignement`, `_vue_requetes`, `_vue_console`, plus les composeurs `_vue_ensemble`, `_vue_moteurs_sujets`, `_vue_citations` et la coquille `rendu()` (rail à 5 boutons, libellés visibles). Chacune reçoit sa portion du dictionnaire et rien d'autre ; chacune est appelable avec un dictionnaire écrit à la main, sans base présente.
 
 ## 7. Méthode de vérification
 
@@ -258,4 +294,4 @@ Déterminisme (amendement n°2) : `donnees()` étant une fonction pure de `(base
 
 - `_vue_resultats` recalcule `_impact()` de la cible plusieurs fois (mission, tri des candidats) ; la séparation des couches le fera naturellement une fois, sans changer le résultat.
 - La marge affichée par la carte courbe est celle de la collecte entière (`_marge(resume)`) alors que la courbe est à périmètre commun ; cohérent avec l'existant, conservé tel quel, mais un jour la bande pourrait se calculer sur l'échantillon du périmètre constant.
-- `historique` est plafonné à 25 lignes par la requête SQL mais la vue s'intitule « N enregistrées » avec N = lignes affichées : à 26 collectes, le titre dira 25. Rien à faire aujourd'hui, à savoir.
+- `historique` est plafonné à 25 lignes par la requête SQL, et le titre de la vue compte les lignes affichées : à 26 collectes, il en annoncera 25. Rien à faire aujourd'hui, à savoir. *(Depuis le 12/08/2026, ce titre distingue les collectes de la série des collectes hors série ; le plafond, lui, n'a pas bougé.)*
