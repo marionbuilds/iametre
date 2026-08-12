@@ -77,48 +77,6 @@ Deux règles de comptage héritées des attributs : jamais depuis une URL — un
 
 Ce que ça a donné, tant que le moteur sans recherche web était collecté : il ne connaissait **aucun** des faits déclarés — cohérent avec ce que mesurait la « mémoire de marque », et c'en était le prolongement : de « connaît-il la marque » à « connaît-il le domaine ».
 
-## Où tu es faible, et qui prend la place
-
-Un taux de citation dit qu'on n'est pas là. Il ne dit pas **qui y est à notre place** — et c'est cette question-là qui décide de ce qu'on écrit ensuite : un sujet que personne n'occupe et un sujet tenu par un concurrent installé n'appellent pas le même contenu.
-
-La table `sources` stocke le domaine de **chaque** citation de **chaque** réponse, pas seulement les nôtres. La carte « Tes points faibles » n'a donc rien eu à collecter de neuf : elle croise les requêtes sous le seuil de citation avec les domaines qui occupent le terrain sur ces mêmes requêtes.
-
-> **Ce que la carte ne prétend pas faire, et c'est écrit dessus** : savoir qui est devant ne dit pas *pourquoi*. C'est la vue Exploration qui s'en charge.
-
-## Exploration : ce que font ceux qui te devancent
-
-Un étage de **pré-sélection**, avant qu'une requête entre dans la machine hebdomadaire. On y explore — une page lue une fois, un instantané daté — là où la collecte, elle, mesure.
-
-```bash
-python -m geotracker.concurrents            # les requêtes faibles de la dernière collecte
-python -m geotracker.concurrents --dry-run  # montre les pages visées, n'appelle rien
-```
-
-Le tracker connaît l'URL exacte de chaque page citée. Ces pages sont **lues telles quelles** et comparées à la nôtre sur six critères qui ont tous la même propriété : **ils se vérifient dans le HTML.**
-
-| Critère | D'où il sort |
-|---|---|
-| Un blog | chemins éditoriaux dans les liens du site |
-| Un auteur affiché | `author` du balisage, `rel="author"`, encart d'auteur |
-| Fraîcheur | `dateModified` / `datePublished`, `article:modified_time`, `<time>` |
-| Tableaux, listes | comptage des balises |
-| Mentions extérieures | `sameAs` du balisage + liens sortants vers d'autres domaines |
-| Longueur | mots du contenu éditorial, hors navigation |
-
-**Aucun abonnement, aucune donnée achetée** : ni backlinks, ni autorité de domaine. C'est une contrainte assumée, pas un manque — les six critères tiennent sans.
-
-Quatre choses que ce module refuse de faire :
-
-**Il n'établit aucune cause.** « Il est plus frais que toi » n'est pas « il est devant parce qu'il est plus frais ». Un tableau comparatif est précisément l'objet qui donne envie d'oublier le garde-fou n°3, donc l'avertissement est sur la carte elle-même, pas dans une note de bas de page.
-
-**Une page illisible n'est jamais une page vide.** Timeout, 403, contenu rendu en JavaScript : la ligne dit « non lisible » et **ne renseigne aucun critère**. L'absence de preuve n'est pas une preuve d'absence — c'est le même faux silencieux que le produit chasse ailleurs.
-
-**Les plateformes sont écartées.** Demander si une vidéo YouTube « a un blog » produirait une ligne de tableau vide de sens, qui se lirait pourtant comme un point faible du concurrent. Qu'elles occupent le terrain reste visible ailleurs.
-
-**Le brut n'est pas conservé, contrairement aux réponses d'IA.** Garder le HTML de vingt pages par collecte gonflerait une base versionnée dans Git. Conséquence assumée et écrite : **un scan est un instantané daté qui ne se rejoue pas.** C'est l'exact inverse de la règle qui vaut pour les réponses d'IA, où le brut est le seul actif non copiable.
-
-Au passage, deux cartes ont fusionné : « forteresses » portait le taux de citation, « dominance » la part de première position — **sur presque les mêmes requêtes**, quatre lignes sur cinq en commun. Elles se lisaient comme une répétition. Les deux mesures tiennent maintenant sur la même ligne : citée à X %, première dans Y % de ses citations.
-
 ## Les cinq garde-fous
 
 **La marge de fluctuation.** Un taux de citation calculé sur un échantillon a une marge d'erreur. Elle est calculée à 95 % (`_marge()`, dans `dashboard_donnees.py`) et l'outil **refuse d'appeler « progression » un mouvement qui tient dedans** : il l'écrit à l'écran, en toutes lettres.
@@ -133,22 +91,6 @@ Au passage, deux cartes ont fusionné : « forteresses » portait le taux de cit
 **Une configuration incohérente ne produit rien.** Un fichier de suivi peut être valide en YAML et faux en pratique : un concurrent à suivre qui est en réalité le domaine mesuré (le duel se jouerait contre soi-même), une requête référencée dans un fait mais absente du jeu (une faute de frappe qui survivrait indéfiniment), un lexique vide qui resterait à zéro pour toujours. Ces cas sont vérifiés au chargement, et l'outil **s'arrête en listant les incohérences** au lieu de produire une page plausible et fausse.
 
 **L'évolution n'est pas une cause.** Depuis le 07/08/2026, tout le site est balisé en entités : la série mesure donc un **avant-après**, pas une expérience contrôlée (celle qui avait été montée a été close sans résultat, sa trace est dans le YAML). Un avant-après ne démontre aucune causalité : une hausse peut venir du balisage, mais aussi de la saisonnalité BPJEPS (rentrée) ou d'une mise à jour des modèles interrogés. L'outil suit une évolution, il ne prouve pas une cause, et tout ce qui en est présenté doit le dire.
-
-## La console : une panne n'est pas un mauvais résultat
-
-Un instrument qui tourne tout seul toutes les semaines finit par tomber en panne tout seul aussi, et une panne d'API ressemble beaucoup à une chute de visibilité. La vue **Console** existe pour que les deux ne se confondent jamais — ni dans les chiffres, ni à l'œil.
-
-**Deux compteurs, jamais un seul.** Une **panne** (le fournisseur renvoie une erreur) et une **absence de réponse** (l'appel aboutit, la réponse est vide) sortent toutes les deux du dénominateur, mais elles n'appellent pas la même chose : la première se répare, la seconde est le comportement normal d'un moteur — Google n'affiche pas d'AI Overview sur toutes les requêtes. Les additionner sous une seule colonne « Erreurs », ce que faisait la version précédente, revenait à présenter un non-événement comme un incident.
-
-**Le message brut est traduit en verdict.** `HTTP 429: {'code': 'credit_balance_exhausted'}` et `tâche DataForSEO 40101: Internal SE Server Error` ne demandent pas la même chose : l'un une carte bancaire, l'autre rien du tout. Chaque message est rangé dans une famille qui porte le verdict — **à faire**, **subi**, ou **non répertorié** —, et seules les pannes réparables remontent dans « Ce que tu dois faire ». Une famille inconnue ne reçoit **aucun conseil inventé** : elle est signalée comme telle.
-
-> Un piège payé pour de bon : le message de crédits épuisés d'OpenAI est **servi en HTTP 429**. Testé dans le mauvais ordre, une panne sèche s'affiche en « limite de cadence, ça se dissipe tout seul » — et la collecte suivante est amputée à l'identique. L'ordre des familles est donc une contrainte de correction, pas un détail d'implémentation.
-
-**Le coût est affiché avec ses trous.** Perplexity et DataForSEO renvoient un coût en dollars, Anthropic et OpenAI ne renvoient que des jetons. Le total affiché ne couvre donc que ce qui est réellement rapporté, et **nomme les fournisseurs manquants** au lieu de se faire passer pour un total. Reconstituer les deux autres supposerait une grille de prix écrite en dur, qui vieillirait en silence et finirait par afficher un montant faux avec l'aplomb d'un montant vrai.
-
-**Les collectes hors série sont repliées, pas supprimées.** Une collecte qui a lancé moins d'appels qu'il n'y a de requêtes suivies n'a pas pu couvrir le jeu : essai de mise au point ou interruption, elle n'est pas comparable aux autres. Elle garde sa ligne datée — un garde-fou du lanceur s'appuie dessus — mais elle ne se lit plus au même rang qu'une vraie collecte.
-
-Enfin, un bouton **« Copier le diagnostic »** exporte l'état de la machine et les messages bruts en texte, pour les coller ailleurs sans avoir à ouvrir la base.
 
 ## Limite assumée
 

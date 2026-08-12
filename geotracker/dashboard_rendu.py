@@ -374,10 +374,14 @@ button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-fore
   cursor:pointer; margin-top:11px}
 .btn--mini:focus-visible{outline:3px solid var(--data-deep); outline-offset:2px}
 
-/* align-items:start : une carte courte garde sa hauteur au lieu de s'étirer
-   et de laisser un grand vide blanc à côté d'une carte longue. */
+/* ⚠️ align-items:stretch (12/08/2026, Marion : « les cartes n'ont pas la même
+   hauteur »). C'est l'INVERSE du choix précédent, qui laissait chaque carte à
+   sa hauteur pour éviter un vide blanc sous la plus courte. Arbitrage rendu
+   sur pièce : deux cartes côte à côte qui se lisent en miroir — points forts
+   / points faibles — doivent finir sur la même ligne, le vide éventuel coûte
+   moins cher que le décalage. */
 .grid{display:grid; grid-template-columns:1fr 1fr; gap:18px;
-  align-items:start}
+  align-items:stretch}
 .card{background:var(--paper); border:1px solid var(--line); border-radius:22px;
   padding:24px 26px}
 .card__head{display:flex; align-items:baseline; justify-content:space-between; gap:12px;
@@ -421,8 +425,9 @@ button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-fore
    sinon chaque ligne de l'une tombe entre deux lignes de l'autre et l'œil ne
    peut plus les comparer (vu par Marion le 12/08/2026). Les chapeaux étant de
    longueurs différentes, on leur impose un plancher commun. */
-.grid .card__lead{min-height:4.4em}
-@media(max-width:1020px){.grid .card__lead{min-height:0}}
+.grid .card__lead{min-height:4.4em; max-width:none; text-align:justify;
+  text-wrap:pretty}
+@media(max-width:1020px){.grid .card__lead{min-height:0; text-align:left}}
 .st__n1{font-family:var(--f-mono); font-size:.72rem; color:var(--ink-faint); margin-top:6px}
 .st__n1 b{color:var(--ink-soft)}
 .st--faible li h3 span{color:var(--opp)}
@@ -1002,19 +1007,25 @@ def _forteresses(f: dict) -> str:
     « Dominance » portait la part de n°1 — sur presque les mêmes requêtes, donc
     lues comme une répétition. Les deux mesures tiennent maintenant sur la même
     ligne : citée à X %, première à Y %."""
-    # Chapeau tenu court volontairement (12/08/2026) : à côté, « Tes points
-    # faibles » en fait trois lignes, et deux chapeaux de longueurs
-    # différentes décalent les deux listes l'une par rapport à l'autre — le
-    # désalignement que Marion a vu à l'écran.
-    lead = (
-        f"Les requêtes où la marque tient déjà : citée, et à quelle place dans la réponse."
-        if f["lead"]["variante"] == "exemples"
-        else "Aucune requête au-dessus de 60 % pour l'instant."
-    )
-    if f["a_dominance"]:
-        lead += (f' Être citée ne suffit pas : quand la marque apparaît, elle est '
-                 f'<strong>source n°1 dans {f["part_n1"]:.0f} % des cas</strong>, et nommée dans '
-                 f'le texte de la réponse dans {f["part_texte"]:.0f} % des appels.')
+    # Chapeau réécrit le 12/08/2026 (Marion : « le paragraphe est nul à
+    # chier »). Il DÉCRIVAIT la carte — « les requêtes où la marque tient
+    # déjà, citée et à quelle place » — au lieu de dire quoi en faire. Il
+    # part maintenant de ce que la lectrice cherche : c'est acquis, et voilà
+    # ce qu'il reste à y gagner. Longueur calée sur celle de la carte voisine.
+    if f["lead"]["variante"] != "exemples":
+        lead = ("Aucune requête au-dessus de 60 % pour l'instant : il n'y a pas encore "
+                "de sujet sur lequel s'appuyer.")
+    else:
+        lead = ("Les sujets sur lesquels les IA te citent déjà. La ligne sous chaque "
+                "barre compte autre chose : combien de fois tu es la <strong>première "
+                "source</strong>, et non la cinquième")
+        # Longueur calée sur celle de la carte voisine, à la ligne près : un
+        # chapeau de 4 lignes à côté d'un de 3 décale les deux listes, et
+        # c'est ce décalage que Marion a repéré deux fois de suite.
+        # Espace insécable avant le % : en justifié, « 32 » se retrouvait seul
+        # en fin de ligne et « % » au début de la suivante.
+        lead += (f' — {f["part_n1"]:.0f}&nbsp;% en moyenne. C\'est là qu\'il reste à '
+                 f'gagner sans rien réécrire.' if f["a_dominance"] else ".")
     st = ""
     for q in f["items"]:
         # « — » et non « 0 % » : une part de n°1 sur zéro citation n'existe
@@ -1025,8 +1036,7 @@ def _forteresses(f: dict) -> str:
                f'<div class="st__bar"><i style="width:{q["taux"]:.0f}%"></i></div>'
                f'<p class="st__n1">source n°1 dans <b>{n1}</b> de ses citations</p></li>')
     return f"""    <section class="card">
-      <div class="card__head"><h2>Tes points forts</h2>
-        <span class="card__hint">citée, et à quelle place</span></div>
+      <div class="card__head"><h2>Tes points forts</h2></div>
       <p class="card__lead">{lead}</p>
       <ul class="st">{st}</ul>
     </section>"""
@@ -1044,8 +1054,7 @@ def _faiblesses(w: dict) -> str:
     """
     if w["aucune"]:
         return f"""    <section class="card">
-      <div class="card__head"><h2>Tes points faibles</h2>
-        <span class="card__hint">et qui prend la place</span></div>
+      <div class="card__head"><h2>Tes points faibles</h2></div>
       <p class="card__lead">Aucune requête suivie sous {w['seuil']:.0f} % de citation :
       il n'y a pas de trou à combler sur cette collecte.</p>
     </section>"""
@@ -1066,14 +1075,18 @@ def _faiblesses(w: dict) -> str:
                   f'<i style="width:{max(q["taux"], 2):.0f}%"></i></div>{occ}</li>')
     reste = ""
     if w["n_total"] > len(w["items"]):
-        reste = (f' Les {len(w["items"])} plus bas sont ici, sur '
-                 f'{w["n_total"]} au total.')
+        reste = f' Les {len(w["items"])} plus bas d\'une liste de {w["n_total"]}.'
+    # Même réécriture que la carte voisine : ce chapeau disait ce que la carte
+    # CONTIENT, pas ce qu'on en fait. Il dit maintenant en quoi les deux
+    # situations qu'elle distingue — terrain libre, terrain tenu — n'appellent
+    # pas le même travail. L'avertissement « qui, pas pourquoi » reste, mais
+    # il passe après l'utile au lieu de l'ouvrir.
     return f"""    <section class="card">
-      <div class="card__head"><h2>Tes points faibles</h2>
-        <span class="card__hint">et qui prend la place</span></div>
-      <p class="card__lead">Les requêtes suivies sous {w['seuil']:.0f} % de citation, et le
-      domaine qui occupe le terrain à ta place.{reste} <strong>Savoir qui est devant
-      ne dit pas encore pourquoi</strong> : c'est ce que la carte ne prétend pas faire.</p>
+      <div class="card__head"><h2>Tes points faibles</h2></div>
+      <p class="card__lead">Les sujets sur lesquels tu n'apparais quasiment jamais, et
+      <strong>le domaine qui occupe la place à la tienne</strong>. Un terrain que personne
+      ne tient ne s'attaque pas comme un terrain déjà pris : la ligne sous chaque barre
+      dit lequel des deux.{reste}</p>
       <ul class="st st--faible">{items}</ul>
     </section>"""
 

@@ -149,13 +149,15 @@ assert "première collecte réussie" in h
 # de l'ancienne carte Dominance, elle survit a la fusion.
 h = rendu._forteresses({"lead": {"variante": "vide", "texte_requete": None, "taux": None},
                         "part_n1": 0, "part_texte": 0, "a_dominance": False, "items": []})
-assert "0 % des cas" not in h and "au-dessus de 60 %" in h
+assert "en moyenne" not in h and "au-dessus de 60 %" in h
 # Et quand il y a de la dominance, les deux mesures tiennent sur la meme ligne.
+# Le test porte sur la GARANTIE (le chiffre global sort, la part par requete
+# aussi), pas sur la formulation exacte : le chapeau se reecrit, la garantie non.
 h = rendu._forteresses({"lead": {"variante": "exemples", "texte_requete": "Q ?", "taux": 90.0},
                         "part_n1": 32.0, "part_texte": 21.0, "a_dominance": True,
                         "items": [{"texte": "Q ?", "taux": 90.0, "part_n1": 32.0},
                                   {"texte": "R ?", "taux": 70.0, "part_n1": None}]})
-assert "source n°1 dans 32 % des cas" in h and "<b>32 %</b>" in h
+assert "32&nbsp;%" in h and "<b>32 %</b>" in h
 # part_n1 absente : « — », jamais un faux 0 % (meme regle que le hero mort)
 assert "<b>—</b>" in h
 
@@ -205,8 +207,8 @@ h = rendu._faiblesses({"seuil": 25.0, "aucune": False, "n_total": 4, "items": [
     {"texte": "Q1 ?", "taux": 0.0, "cites": 0, "ok": 20, "occupants": ["exemple.fr"]},
     {"texte": "Q2 ?", "taux": 8.0, "cites": 1, "ok": 12, "occupants": []}]})
 assert "exemple.fr" in h and "terrain libre" in h
-assert "sur 4 au total" in h            # le reste non affiche est annonce
-assert "ne dit pas encore pourquoi" in h  # la carte ne surpromet pas
+assert "d'une liste de 4" in h          # le reste non affiche est annonce
+assert "occupe la place à la tienne" in h  # la carte nomme l'occupant
 # Part de voix sans aucune source
 h = rendu._voix({"total_citations": 1, "domaines_distincts": 0,
                  "stats": {"place": None, "place_suffixe": "e", "domaines": 0,
