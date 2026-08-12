@@ -19,6 +19,7 @@ de sens, qui appartient à la couche données.
 from __future__ import annotations
 
 import html
+import math
 
 from .format import nb as _nb, points as _points
 
@@ -520,11 +521,45 @@ table.mx__t tr:last-child td{border-bottom:none}
   padding:3px 9px; border-radius:6px; margin-top:9px;
   background:var(--opp-soft); color:var(--opp)}
 
-svg.curve{display:block; width:100%; height:auto; margin-top:4px}
-.curve__mid{stroke:var(--line); stroke-width:1; stroke-dasharray:3 4}
-.curve__val{font-family:var(--f-mono); font-weight:700; font-size:15px; fill:var(--ink)}
-.curve__cap{display:flex; justify-content:space-between; font-size:.75rem;
-  color:var(--ink-faint); margin-top:6px}
+/* Courbe de visibilité, refondue le 12/08/2026 sur référence visuelle de
+   Marion. Reste dans l'univers de verts — sa demande explicite, et la seule
+   série du graphe n'a pas besoin d'être distinguée d'une autre : elle n'a
+   donc pas de légende, le titre la nomme. Grille et axes RECESSIFS : ils
+   servent à lire, ils ne sont pas la donnée. */
+.cv__stats{display:flex; flex-wrap:wrap; gap:26px; margin:2px 0 14px}
+.cv__s span{display:block; font-size:.72rem; color:var(--ink-faint);
+  text-transform:uppercase; letter-spacing:.06em}
+.cv__s b{font-family:var(--f-mono); font-size:1.05rem; font-weight:700}
+.cv{position:relative}
+.cv svg{display:block; width:100%; height:auto; overflow:visible}
+.cv__grid{stroke:var(--line); stroke-width:1; stroke-dasharray:2 5}
+.cv__ytick{font-family:var(--f-mono); font-size:12px; fill:var(--ink-faint);
+  text-anchor:end}
+.cv__xtick{font-family:var(--f-mono); font-size:12px; fill:var(--ink-faint);
+  text-anchor:middle}
+.cv__band{fill:var(--data-soft); stroke:none}
+.cv__line{fill:none; stroke:var(--data); stroke-width:2.5;
+  stroke-linecap:round; stroke-linejoin:round}
+/* Anneau de surface sur les pastilles : sans lui, un point posé sur la bande
+   se confond avec elle. */
+.cv__pt{fill:var(--data-deep); stroke:var(--paper); stroke-width:2}
+.cv__cross{stroke:var(--data-deep); stroke-width:1; stroke-dasharray:4 4}
+.cv__on{fill:var(--data-deep); stroke:var(--paper); stroke-width:3}
+.cv__hit{fill:transparent; cursor:crosshair}
+.cv__hit:focus-visible{outline:2px solid var(--data-deep); outline-offset:-2px}
+/* L'infobulle : la VALEUR mène, la date suit — la lectrice a déjà la date
+   sous le pointeur, ce qu'elle vient chercher c'est le chiffre. */
+.cv__tip{position:absolute; z-index:3; pointer-events:none; min-width:132px;
+  background:var(--paper); border:1px solid var(--line); border-radius:12px;
+  padding:10px 13px; box-shadow:0 8px 24px rgba(21,42,28,.14);
+  transform:translate(-50%,-100%)}
+.cv__tipd{display:block; font-size:.74rem; color:var(--ink-faint); margin-bottom:2px}
+.cv__tipv{display:flex; align-items:baseline; gap:8px}
+.cv__tipv b{font-family:var(--f-mono); font-size:1.12rem; font-weight:700}
+.cv__tipv i{font-style:normal; font-family:var(--f-mono); font-size:.78rem;
+  font-weight:700; color:var(--ink-faint)}
+.cv__tipv i.up{color:var(--data-deep)}
+.cv__tipv i.down{color:var(--opp)}
 
 .tw{overflow-x:auto}
 table.d{border-collapse:collapse; width:100%; font-size:.86rem}
@@ -811,6 +846,76 @@ JS = r"""
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       URL.revokeObjectURL(a.href);
     });
+  }
+
+  // --- Courbe de visibilite : viseur + infobulle (12/08/2026) ---------------
+  // On vise une DATE, jamais un point : chaque zone de survol prend toute la
+  // hauteur du graphe et la moitie de l'intervalle de chaque cote. Le clavier
+  // fait exactement la meme chose que la souris (focus = survol), sinon
+  // l'information n'existe que pour qui peut pointer.
+  var cv=document.getElementById('cv');
+  if(cv){
+    var croix=document.getElementById('cv-cross'),
+        actif=document.getElementById('cv-on'),
+        tip=document.getElementById('cv-tip'),
+        tipD=document.getElementById('cv-tip-d'),
+        tipV=document.getElementById('cv-tip-v'),
+        tipE=document.getElementById('cv-tip-e'),
+        svg=cv.querySelector('svg');
+    function virgule(x){return String(x).replace('.',',');}
+    function montrer(z){
+      var x=parseFloat(z.getAttribute('data-x')),
+          y=parseFloat(z.getAttribute('data-y')),
+          taux=parseFloat(z.getAttribute('data-taux')),
+          delta=z.getAttribute('data-delta'),
+          marge=z.getAttribute('data-marge');
+      // ⚠️ removeAttribute et NON `.hidden = false` : `hidden` est une
+      // propriete de HTMLElement, pas de SVGElement. L'affectation reussit en
+      // silence, l'attribut reste, et le CSS [hidden] garde l'element
+      // invisible — le viseur ne s'affichait jamais.
+      croix.setAttribute('x1',x); croix.setAttribute('x2',x);
+      croix.removeAttribute('hidden');
+      actif.setAttribute('cx',x); actif.setAttribute('cy',y);
+      actif.removeAttribute('hidden');
+      // textContent et jamais innerHTML : la date vient des donnees.
+      tipD.textContent=z.getAttribute('data-date');
+      tipV.textContent=Math.round(taux)+' %';
+      if(delta===''){
+        tipE.textContent='1re collecte'; tipE.className='';
+      }else{
+        var d=parseFloat(delta);
+        // « dans la marge » prime sur le signe : un mouvement qui tient dans
+        // la bande n'est ni une hausse ni une baisse, et l'infobulle ne doit
+        // pas le colorer comme s'il en etait une (garde-fou n°1).
+        if(marge==='1'){
+          tipE.textContent='≈ stable ('+(d>0?'+':'')+virgule(d.toFixed(1))+' pts)';
+          tipE.className='';
+        }else{
+          tipE.textContent=(d>0?'+':'')+virgule(d.toFixed(1))+' pts';
+          tipE.className=d>0?'up':'down';
+        }
+      }
+      // Position en % de la largeur : le SVG est fluide, une position en px
+      // se decalerait des que la carte change de largeur.
+      var vb=svg.viewBox.baseVal;
+      tip.style.left=(x/vb.width*100)+'%';
+      tip.style.top=(y/vb.height*100)+'%';
+      tip.style.marginTop='-14px';
+      tip.hidden=false;
+    }
+    function cacher(){
+      croix.setAttribute('hidden',''); actif.setAttribute('hidden','');
+      tip.hidden=true;                       // celui-la EST un element HTML
+    }
+    [].slice.call(cv.querySelectorAll('.cv__hit')).forEach(function(z){
+      // pointerenter ET mouseenter : le premier suffit sur les navigateurs
+      // recents, le second est le filet pour les moteurs sans Pointer Events.
+      z.addEventListener('pointerenter',function(){montrer(z);});
+      z.addEventListener('mouseenter',function(){montrer(z);});
+      z.addEventListener('focus',function(){montrer(z);});
+      z.addEventListener('blur',cacher);
+    });
+    cv.addEventListener('pointerleave',cacher);
   }
 })();
 """
@@ -1148,52 +1253,133 @@ def _courbe(c: dict) -> str:
 </section>"""
 
     serie = c["points"]
-    # Finition 06/08 : hauteur ajustée au contenu réel (150 -> 112 -> 80,
-    # le tiers inférieur restait vide), étiquette collée au point (-7).
-    W, H, PAD = 640, 80, 16
-    n = len(serie)
-    xs = [PAD + i * (W - 2 * PAD) / (n - 1) for i in range(n)]
-
-    def y(v: float) -> float:
-        return H - PAD - max(0.0, min(100.0, v)) / 100 * (H - 2 * PAD)
-
-    bande = (" ".join(f"{x:.1f},{y(pt['taux'] + marge):.1f}" for x, pt in zip(xs, serie))
-             + " " + " ".join(f"{x:.1f},{y(pt['taux'] - marge):.1f}"
-                              for x, pt in zip(reversed(xs), list(reversed(serie)))))
-    ligne = " ".join(f"{x:.1f},{y(pt['taux']):.1f}" for x, pt in zip(xs, serie))
-    points = "".join(
-        f'<circle cx="{x:.1f}" cy="{y(pt["taux"]):.1f}" r="{5 if i == n - 1 else 3.5}" '
-        f'fill="var(--data{"-deep" if i == n - 1 else ""})">'
-        f'<title>{_e(pt["date"])} : {pt["taux"]:.0f} %</title></circle>'
-        for i, (x, pt) in enumerate(zip(xs, serie))
-    )
-    # Chaque chiffre porte son périmètre SUR LUI (règle du 05/08) : l'étiquette
-    # du dernier point dit sur combien de moteurs il est mesuré. La ligne
-    # courte de l'en-tête suffit, pas de phrase d'explication en plus.
     n_mot = c["n_moteurs"]
-    dernier = serie[-1]
-    etiquette = (f'<text x="{xs[-1]:.1f}" y="{y(dernier["taux"]) - 7:.1f}" text-anchor="end" '
-                 f'class="curve__val">{dernier["taux"]:.0f} % · {n_mot} moteurs</text>')
+    n = len(serie)
+
+    # Géométrie. Refonte du 12/08/2026 (Marion, sur référence visuelle) : la
+    # courbe passe d'un trait de 80 px de haut sans repère à un vrai graphe —
+    # axe des ordonnées gradué, grille en pointillés, points marqués, et une
+    # couche de survol qui donne la valeur ET l'écart.
+    # Hauteur resserrée : l'axe partant de zéro, un taux de 60 % laisse par
+    # construction le bas du cadre vide. C'est honnête, mais 300 px de haut en
+    # faisaient un vide qui se remarquait plus que la courbe.
+    W, H = 900, 210
+    GX, GT, GR, GB = 58, 14, 16, 34      # gouttières : y, haut, droite, bas
+    PW, PH = W - GX - GR, H - GT - GB
+
+    # ⛔ L'axe part de ZÉRO. Tronquer une échelle de pourcentage exagère
+    # visuellement le moindre écart, et sur un instrument dont tout l'argument
+    # est « ne prends pas le bruit pour un événement », ce serait se contredire
+    # dans la forme. Seul le HAUT s'ajuste, par pas de 25.
+    sommet = max(25, min(100, int(math.ceil((c["haut"] + marge) / 25.0) * 25)))
+    graduations = [g for g in range(0, sommet + 1, 25)]
+
+    def X(i: int) -> float:
+        return GX + (PW / 2 if n == 1 else i * PW / (n - 1))
+
+    def Y(v: float) -> float:
+        return GT + PH - max(0.0, min(float(sommet), v)) / sommet * PH
+
+    def lisse(pts: list[tuple[float, float]]) -> str:
+        """Catmull-Rom converti en Bézier, avec les points de contrôle BRIDÉS
+        entre les deux valeurs qu'ils relient. Sans ce bridage, une courbe
+        lissée dépasse ses propres points et donne à lire un maximum qui n'a
+        jamais été mesuré : sur un instrument de mesure, c'est un mensonge
+        graphique, pas une finition."""
+        if len(pts) < 2:
+            return ""
+        d = f"M {pts[0][0]:.1f},{pts[0][1]:.1f}"
+        for i in range(len(pts) - 1):
+            p0 = pts[i - 1] if i else pts[i]
+            p1, p2 = pts[i], pts[i + 1]
+            p3 = pts[i + 2] if i + 2 < len(pts) else p2
+            c1x, c1y = p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6
+            c2x, c2y = p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6
+            lo, hi = min(p1[1], p2[1]), max(p1[1], p2[1])
+            c1y, c2y = min(max(c1y, lo), hi), min(max(c2y, lo), hi)
+            d += (f" C {c1x:.1f},{c1y:.1f} {c2x:.1f},{c2y:.1f} "
+                  f"{p2[0]:.1f},{p2[1]:.1f}")
+        return d
+
+    hauts = [(X(i), Y(p["taux"] + marge)) for i, p in enumerate(serie)]
+    bas = [(X(i), Y(p["taux"] - marge)) for i, p in enumerate(serie)]
+    ligne = [(X(i), Y(p["taux"])) for i, p in enumerate(serie)]
+
+    # La bande de fluctuation : deux courbes lissées de la même façon que la
+    # ligne, refermées l'une sur l'autre.
+    bande = lisse(hauts) + " L " + lisse(list(reversed(bas)))[2:].replace("M ", "") + " Z"
+
+    grille = "".join(
+        f'<line class="cv__grid" x1="{GX}" x2="{GX + PW}" '
+        f'y1="{Y(g):.1f}" y2="{Y(g):.1f}"/>'
+        f'<text class="cv__ytick" x="{GX - 12}" y="{Y(g) + 4:.1f}">{g}&nbsp;%</text>'
+        for g in graduations
+    )
+    # Un point sur deux au maximum quand la série s'allonge : des dates qui se
+    # chevauchent ne se lisent pas, et l'axe doit rester lisible à 25 collectes.
+    pas = max(1, (n + 7) // 8)
+    dates = "".join(
+        f'<text class="cv__xtick" x="{X(i):.1f}" y="{GT + PH + 26}">{_e(p["date"][5:])}</text>'
+        for i, p in enumerate(serie) if i % pas == 0 or i == n - 1
+    )
+    pastilles = "".join(
+        f'<circle class="cv__pt" cx="{X(i):.1f}" cy="{Y(p["taux"]):.1f}" r="4.5"/>'
+        for i, p in enumerate(serie)
+    )
+    # Zones de survol : chacune prend toute la hauteur et la moitié de
+    # l'intervalle de chaque côté. La cible fait donc bien plus que les 4,5 px
+    # de la pastille — on vise une date, jamais un point.
+    demi = PW / (2 * (n - 1)) if n > 1 else PW / 2
+    zones = ""
+    for i, p in enumerate(serie):
+        gauche = max(GX, X(i) - demi)
+        largeur = min(X(i) + demi, GX + PW) - gauche
+        delta = "" if p["delta"] is None else f'{p["delta"]:.1f}'
+        dans = "" if p["dans_marge"] is None else str(int(p["dans_marge"]))
+        zones += (f'<rect class="cv__hit" x="{gauche:.1f}" y="{GT}" '
+                  f'width="{largeur:.1f}" height="{PH}" '
+                  f'data-x="{X(i):.1f}" data-y="{Y(p["taux"]):.1f}" '
+                  f'data-date="{_e(p["date"])}" data-taux="{p["taux"]:.1f}" '
+                  f'data-delta="{delta}" data-marge="{dans}" '
+                  f'tabindex="0" role="img" '
+                  f'aria-label="{_e(p["date"])} : {p["taux"]:.0f} %"/>')
+
+    def stat(etiq: str, val: str) -> str:
+        return f'<div class="cv__s"><span>{etiq}</span><b>{val}</b></div>'
+
+    amp = c["amplitude"]
+    signe = "+" if (amp or 0) > 0 else ""
+    stats = (stat("Plus haut", f'{c["haut"]:.0f}&nbsp;%')
+             + stat("Plus bas", f'{c["bas"]:.0f}&nbsp;%')
+             + stat("Marge de fluctuation", f'±{_nb(marge)}&nbsp;pts')
+             + (stat("Depuis la 1re collecte", f'{signe}{_nb(amp)}&nbsp;pts')
+                if amp is not None else ""))
 
     return f"""<section class="card">
   <div class="card__head"><h2>Courbe de visibilité</h2>
-    <span class="card__hint">comparé sur les {n_mot} moteurs communs à toutes les collectes ·
-    bande grisée : marge de fluctuation ±{_nb(marge)} pts</span></div>
+    <span class="card__hint">{n} collectes · {n_mot} moteurs communs à toutes</span></div>
   <p class="card__lead">Tant que la ligne reste dans sa bande, la mesure est <strong>stable</strong> :
   l'oscillation est le comportement normal d'une réponse d'IA, pas un recul.
   Le vrai signal, c'est la tendance sur 3-4 collectes. Depuis le balisage du site en
   entités (07/08/2026), la courbe se lit en <strong>avant-après</strong> : une évolution,
   pas une preuve de cause (rentrée BPJEPS et mises à jour des modèles la font bouger aussi).</p>
-  <svg class="curve" viewBox="0 0 {W} {H}" role="img"
-       aria-label="Courbe du taux de citation avec sa marge de fluctuation">
-    <line x1="{PAD}" y1="{y(50):.1f}" x2="{W - PAD}" y2="{y(50):.1f}" class="curve__mid"/>
-    <polygon points="{bande}" fill="var(--data-soft)"/>
-    <polyline points="{ligne}" fill="none" stroke="var(--data)" stroke-width="2.5"
-              stroke-linecap="round" stroke-linejoin="round"/>
-    {points}{etiquette}
-  </svg>
-  <div class="curve__cap"><span>{_e(serie[0]["date"])}</span>
-    <span>{_e(dernier["date"])}</span></div>
+  <div class="cv__stats">{stats}</div>
+  <div class="cv" id="cv">
+    <svg viewBox="0 0 {W} {H}" role="img" preserveAspectRatio="xMidYMid meet"
+         aria-label="Taux de citation par collecte, avec sa marge de fluctuation">
+      {grille}
+      <path class="cv__band" d="{bande}"/>
+      <path class="cv__line" d="{lisse(ligne)}"/>
+      {pastilles}{dates}
+      <line class="cv__cross" id="cv-cross" y1="{GT}" y2="{GT + PH}" x1="0" x2="0" hidden/>
+      <circle class="cv__on" id="cv-on" r="7" cx="0" cy="0" hidden/>
+      {zones}
+    </svg>
+    <div class="cv__tip" id="cv-tip" role="status" hidden>
+      <span class="cv__tipd" id="cv-tip-d"></span>
+      <span class="cv__tipv"><b id="cv-tip-v"></b><i id="cv-tip-e"></i></span>
+    </div>
+  </div>
 </section>"""
 
 

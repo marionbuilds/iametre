@@ -161,6 +161,28 @@ assert "32&nbsp;%" in h and "<b>32 %</b>" in h
 # part_n1 absente : « — », jamais un faux 0 % (meme regle que le hero mort)
 assert "<b>—</b>" in h
 
+# --- Courbe de visibilite : l'axe part de zero, la marge prime sur le signe -
+_cv = {"variante": "tracee", "marge": 6.7, "n_moteurs": 3, "haut": 66.0,
+       "bas": 59.0, "amplitude": 5.0,
+       "points": [{"date": "2026-07-29", "taux": 59.0, "delta": None, "dans_marge": None},
+                  {"date": "2026-08-03", "taux": 66.0, "delta": 6.1, "dans_marge": True},
+                  {"date": "2026-08-10", "taux": 64.0, "delta": -1.5, "dans_marge": True}]}
+h = rendu._courbe(_cv)
+# ⛔ L'axe commence a ZERO : tronquer une echelle de pourcentage exagererait
+# le moindre ecart, sur un instrument dont tout l'argument est l'inverse.
+assert '>0&nbsp;%<' in h, "la graduation zero doit exister"
+assert '>75&nbsp;%<' in h and '>100&nbsp;%<' not in h  # sommet ajuste, pas fixe
+# Chaque point porte son ecart ET de quel cote de la marge il tombe : c'est
+# ce que l'infobulle lit, et c'est le garde-fou n1 rendu point par point.
+assert 'data-delta="6.1" data-marge="1"' in h
+assert 'data-delta="" data-marge=""' in h          # 1re collecte : pas d'ecart
+assert 'class="cv__band"' in h and 'class="cv__line"' in h
+# Le survol vise une DATE : autant de zones que de points, pleine hauteur.
+assert h.count('class="cv__hit"') == 3
+# Une seule serie : pas de legende, le titre nomme la courbe.
+assert "legend" not in h.lower()
+print("OK  courbe : axe a zero, ecart et marge par point, zones de survol")
+
 # --- Scan des pages concurrentes : extraction PURE, sans reseau ------------
 # Le module lit des sites tiers, qui changent : le test ne doit dependre
 # d'AUCUN d'entre eux. `signaux()` est donc une fonction pure, verifiee sur

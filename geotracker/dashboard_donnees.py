@@ -1222,11 +1222,28 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
     }
 
     sctx = d["serie_ctx"]
+    # Chaque point porte son ÉCART avec le précédent, et surtout de quel côté
+    # de la marge il tombe : c'est ce que l'infobulle affiche au survol, et
+    # c'est le garde-fou n°1 rendu lisible point par point plutôt qu'une fois
+    # dans le chapeau. Le premier point n'a pas d'écart — `null`, pas zéro.
+    pts = []
+    for i, p in enumerate(d["serie"]):
+        delta = None if i == 0 else p["taux"] - d["serie"][i - 1]["taux"]
+        pts.append({
+            "date": p["date"], "taux": p["taux"], "delta": delta,
+            "dans_marge": None if delta is None else abs(delta) <= marge,
+        })
+    taux_series = [p["taux"] for p in d["serie"]] or [0]
     courbe = {
         "variante": "attente" if len(d["serie"]) < 2 else "tracee",
         "marge": marge,
         "n_moteurs": sctx["n_moteurs"] if sctx else len(d["moteurs"]),
-        "points": d["serie"],
+        "points": pts,
+        "haut": max(taux_series),
+        "bas": min(taux_series),
+        # L'écart de bout en bout : la seule lecture qui ait un sens sur une
+        # série courte, la tendance ne se lit qu'à partir de 3-4 collectes.
+        "amplitude": (taux_series[-1] - taux_series[0]) if len(taux_series) > 1 else None,
     }
 
     avec = [m for m in d["moteurs"] if m["recherche"]]
