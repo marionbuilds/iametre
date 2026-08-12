@@ -1087,20 +1087,49 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
         "lignes": lignes_voix,
     }
 
+    # ⚠️ FUSION DU 12/08/2026 (Marion) : « forteresses » et « dominance »
+    # affichaient DEUX MESURES DIFFÉRENTES SUR LES MÊMES REQUÊTES — 4 des 5
+    # lignes étaient communes au run #16 — et se lisaient donc comme une
+    # répétition. Elles n'en font plus qu'une : une requête forte porte son
+    # taux de citation ET sa part de n°1, côte à côte. La question « je suis
+    # citée, mais est-ce que je suis première ? » se lit sur une seule ligne.
+    domg = d["dominance"]
+    n1_par_requete = {x["id"]: x["part"] for x in d["dominance_requetes"]}
     forteresses = {
         "lead": ({"variante": "exemples", "texte_requete": forts[0]["texte"],
                   "taux": forts[0]["taux"]}
                  if forts else {"variante": "vide", "texte_requete": None, "taux": None}),
-        "items": [{"texte": q["texte"], "taux": q["taux"]} for q in forts],
-    }
-
-    domg = d["dominance"]
-    dominance = {
         "part_n1": domg["n1"] / domg["cites"] * 100 if domg["cites"] else 0,
         "part_texte": domg["en_texte"] / domg["ok"] * 100 if domg["ok"] else 0,
-        "items": [{"texte": x["texte"], "part": x["part"]}
-                  for x in d["dominance_requetes"][:5]],
-        "vide": not d["dominance_requetes"],
+        "a_dominance": bool(d["dominance_requetes"]),
+        "items": [{"texte": q["texte"], "taux": q["taux"],
+                   # None (et pas 0) quand la requête n'a aucune citation :
+                   # une part de n°1 sur zéro citation n'existe pas, elle ne
+                   # vaut pas zéro. Le render affiche « — ».
+                   "part_n1": n1_par_requete.get(q["id"])}
+                  for q in forts],
+    }
+
+    # Nouvelle carte, à la place de « dominance » (Marion, 12/08/2026) : les
+    # requêtes où la marque est faible, ET QUI PREND LA PLACE À SA PLACE.
+    # ⚠️ Ce n'est PAS un doublon de « À faire » : celle-là prescrit trois
+    # actions classées par gain estimé, celle-ci pose le diagnostic
+    # concurrentiel sur l'ensemble des trous. C'est le premier palier du
+    # chantier « dépasser le concurrent » — et il ne coûte rien, parce que la
+    # table `sources` stockait déjà l'occupant de chaque réponse.
+    faiblesses = {
+        "seuil": SEUIL_TROU,
+        "aucune": not trous,
+        "n_total": len(trous),
+        "items": [
+            {"texte": q["texte"], "taux": q["taux"], "cites": q["cites"], "ok": q["ok"],
+             # Les domaines qui occupent le terrain, dans l'ordre où ils
+             # occupent. Vide = personne ne s'impose, c'est un terrain libre
+             # et pas une place à prendre à quelqu'un : deux situations qui
+             # n'appellent pas le même contenu.
+             "occupants": d["occupants"].get(q["id"], [])[:3]}
+            for q in sorted(trous, key=lambda q: q["taux"])[:5]
+        ],
     }
 
     # pages_resume a disparu en Passe 1 : c'était une version tronquée
@@ -1229,7 +1258,7 @@ def donnees(conn, run_id: int, date_du_jour) -> dict:
     }
 
     return {"meta": meta, "hero": hero, "moteurs": moteurs, "a_faire": a_faire,
-            "voix": voix, "forteresses": forteresses, "dominance": dominance,
+            "voix": voix, "forteresses": forteresses, "faiblesses": faiblesses,
             "duel": duel, "courbe": courbe, "matrice": matrice,
             "alignement": alignement, "jeu_requetes": jeu_requetes,
             "console": console}

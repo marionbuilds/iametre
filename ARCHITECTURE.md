@@ -11,7 +11,7 @@
 > **PASSE 1 (05/08/2026, corrigée le jour même)** : restructuration délibérée de
 > l'interface. Le HTML change, la référence ne pilote plus rien (gardée comme trace).
 > **5 vues à libellés visibles** : Vue d'ensemble (hero avec règle graduée, moteurs,
-> À faire, duel, voix + stats, forteresses + dominance, courbe en dernier) ·
+> À faire, duel, voix + stats, **forteresses + points faibles**, courbe en dernier) ·
 > Moteurs et sujets (matrice) · Ce que les IA citent chez toi (alignement) ·
 > Requêtes (compteurs + formulaire) · **Console** *(ex-« Collectes », restructurée
 > le 12/08/2026 — voir §3.15)*. Acquis : `pages_resume` supprimé,
@@ -135,21 +135,39 @@ entre une structure et une fonctionnalité existante, on s'arrête et on demande
 | `lignes[].est_poursuivant` | bool | premier non-moi (classe `is-chaser`) |
 | `lignes[].ecart` | float\|null | seulement sur le poursuivant quand la marque est 1re (l.1358-1361) — render : « à {_nb(ecart)} pts derrière la marque » |
 
-### 3.7 `forteresses`
+### 3.7 `forteresses` — dominance fusionnée dedans (12/08/2026)
+
+⚠️ **Pourquoi la fusion.** `forteresses` portait le taux de citation, `dominance`
+la part de première position — **sur presque les mêmes requêtes** (4 lignes sur 5
+communes au run #16). Deux cartes côte à côte qui listent les mêmes questions se
+lisent comme une répétition, quelle que soit la différence de mesure. Les deux
+tiennent maintenant sur une ligne : citée à X %, première dans Y % de ses citations.
 
 | Champ | Type | Provenance actuelle |
 |---|---|---|
-| `lead` | dict | l.1350-1354. `{variante: "exemples"\|"vide", texte_requete: str\|null, taux: float\|null}` — le render assemble la phrase |
-| `items` | list | 5 max, requêtes ≥ 60 % (l.1134) : `[{texte: str, taux: float}]` |
+| `lead` | dict | `{variante: "exemples"\|"vide", texte_requete: str\|null, taux: float\|null}` — le render assemble la phrase |
+| `part_n1` | float | `n1 / cites * 100` — « source n°1 dans 32 % des cas » (render formate) |
+| `part_texte` | float | `en_texte / ok * 100` — « nommée dans le texte … 21 % » |
+| `a_dominance` | bool | faux = aucune citation sur la collecte. **La phrase de dominance ne sort pas** : « source n°1 dans 0 % des cas » prétendrait mesurer une part sur zéro citation. Garantie héritée de l'ancienne carte, testée dans `tests_smoke.py` |
+| `items` | list | 5 max, requêtes ≥ 60 % : `[{texte: str, taux: float, part_n1: float\|null}]`. **`part_n1` vaut `null`, pas `0`**, quand la requête n'a aucune citation — même règle que le hero d'une collecte morte |
 
-### 3.8 `dominance`
+### 3.8 `faiblesses` — « Tes points faibles », à la place de l'ancienne dominance
+
+Demandée par Marion le 12/08/2026. Répond à « une fois les opportunités faites,
+comment je passe devant le concurrent ? » en nommant **qui occupe le terrain** sur
+chaque trou. **Aucune donnée nouvelle collectée** : la table `sources` stocke déjà
+le domaine de chaque citation de chaque réponse, y compris celles des autres.
+
+⛔ **Ce n'est pas un doublon de `a_faire`** : celle-là prescrit trois actions classées
+par gain estimé, avec recette d'article ; celle-ci pose le diagnostic concurrentiel
+sur l'ensemble des trous et s'arrête là.
 
 | Champ | Type | Provenance actuelle |
 |---|---|---|
-| `part_n1` | float | `n1 / cites * 100` (l.1370-1371) — « source n°1 dans 38 % des cas » (render formate) |
-| `part_texte` | float | `en_texte / ok * 100` — « nommée dans le texte … 17 % » (render formate) |
-| `items` | list | `dominance_requetes[:5]` (`collecte()` l.216-231) : `[{texte: str, part: float}]` |
-| `vide` | bool | aucune citation (affiche « Aucune citation sur cette collecte. ») |
+| `seuil` | float | `SEUIL_TROU` (25 %), affiché dans la phrase pour que le critère soit lisible |
+| `aucune` | bool | aucun trou : la carte le **constate** au lieu de lister du vide (états vides, 06/08) |
+| `n_total` | int | nombre de trous **réels**, pour annoncer ce qui n'est pas affiché |
+| `items` | list | 5 max, les plus bas d'abord : `[{texte, taux, cites, ok, occupants: [str]}]`. `occupants` = 3 domaines max, hors marque suivie, dans l'ordre d'occupation. **Liste vide = terrain libre**, ce qui n'est pas la même chose qu'un terrain tenu — le render le dit autrement |
 
 ### 3.9 `pages_resume` — SUPPRIMÉ (Passe 1)
 
@@ -260,7 +278,7 @@ comparable, et le render la replie sans la supprimer (le garde-fou
 ## 4. Ce qui disparaît du dictionnaire actuel
 
 Champs du `d` actuel qui n'apparaissent PAS dans le nouveau dictionnaire, parce qu'ils étaient des données intermédiaires que la couche render recalculait :
-`resume`, `requetes` (brut), `voix` (brut), `occupants`, `dominance` (brut), `dominance_requetes`, `pages` (brut), `duel` (brut), `rival`, `sante` (brut), `matrice` (brut), `delta`, `delta_ctx`, `serie_ctx`, `serie` (brut), `historique` (brut), `produit`.
+`resume`, `requetes` (brut), `voix` (brut), `dominance` (brut), `dominance_requetes`, `pages` (brut), `duel` (brut), `rival`, `sante` (brut), `matrice` (brut), `delta`, `delta_ctx`, `serie_ctx`, `serie` (brut), `historique` (brut), `produit`.
 Toute cette matière est consommée par la couche data pour produire les champs des §3.1-3.15.
 
 ## 5. Export JSON (la seule addition, exigée par la mission)
@@ -280,7 +298,7 @@ Déterminisme (amendement n°2) : `donnees()` étant une fonction pure de `(base
 3. **Échappement HTML** : couche render, au moment de l'insertion.
 4. **Horloge** : jamais lue par la couche data ; `date_du_jour` est un paramètre (amendement n°2, §2 bis).
 5. **Noms de fichiers** : `dashboard_donnees.py` / `dashboard_rendu.py`, `dashboard.py` point d'entrée. (Validés tels quels.)
-6. **Une fonction render par bloc** (état après Passe 1 corrigée) : `_hero`, `_moteurs`, `_a_faire`, `_voix`, `_forteresses`, `_dominance`, `_duel`, `_courbe`, `_matrice`, `_alignement`, `_vue_requetes`, `_vue_console`, plus les composeurs `_vue_ensemble`, `_vue_moteurs_sujets`, `_vue_citations` et la coquille `rendu()` (rail à 5 boutons, libellés visibles). Chacune reçoit sa portion du dictionnaire et rien d'autre ; chacune est appelable avec un dictionnaire écrit à la main, sans base présente.
+6. **Une fonction render par bloc** (état après Passe 1 corrigée) : `_hero`, `_moteurs`, `_a_faire`, `_voix`, `_forteresses`, `_faiblesses`, `_duel`, `_courbe`, `_matrice`, `_alignement`, `_vue_requetes`, `_vue_console`, plus les composeurs `_vue_ensemble`, `_vue_moteurs_sujets`, `_vue_citations` et la coquille `rendu()` (rail à 5 boutons, libellés visibles). Chacune reçoit sa portion du dictionnaire et rien d'autre ; chacune est appelable avec un dictionnaire écrit à la main, sans base présente.
 
 ## 7. Méthode de vérification
 

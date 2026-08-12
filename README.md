@@ -77,6 +77,16 @@ Deux règles de comptage héritées des attributs : jamais depuis une URL — un
 
 Ce que ça a donné, tant que le moteur sans recherche web était collecté : il ne connaissait **aucun** des faits déclarés — cohérent avec ce que mesurait la « mémoire de marque », et c'en était le prolongement : de « connaît-il la marque » à « connaît-il le domaine ».
 
+## Où tu es faible, et qui prend la place
+
+Un taux de citation dit qu'on n'est pas là. Il ne dit pas **qui y est à notre place** — et c'est cette question-là qui décide de ce qu'on écrit ensuite : un sujet que personne n'occupe et un sujet tenu par un concurrent installé n'appellent pas le même contenu.
+
+La table `sources` stocke le domaine de **chaque** citation de **chaque** réponse, pas seulement les nôtres. La carte « Tes points faibles » n'a donc rien eu à collecter de neuf : elle croise les requêtes sous le seuil de citation avec les domaines qui occupent le terrain sur ces mêmes requêtes.
+
+> **Ce que la carte ne prétend pas faire, et c'est écrit dessus** : savoir qui est devant ne dit pas *pourquoi*. Mesurer le pourquoi — fraîcheur du contenu, autorité, signaux E-E-A-T — demanderait d'aller lire les pages concurrentes, et pour l'autorité une source de backlinks payante. Tant que ce n'est pas fait, la carte nomme un fait et s'arrête là.
+
+Au passage, deux cartes ont fusionné : « forteresses » portait le taux de citation, « dominance » la part de première position — **sur presque les mêmes requêtes**, quatre lignes sur cinq en commun. Elles se lisaient comme une répétition. Les deux mesures tiennent maintenant sur la même ligne : citée à X %, première dans Y % de ses citations.
+
 ## Les cinq garde-fous
 
 **La marge de fluctuation.** Un taux de citation calculé sur un échantillon a une marge d'erreur. Elle est calculée à 95 % (`_marge()`, dans `dashboard_donnees.py`) et l'outil **refuse d'appeler « progression » un mouvement qui tient dedans** : il l'écrit à l'écran, en toutes lettres.

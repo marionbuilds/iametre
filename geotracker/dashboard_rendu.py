@@ -414,6 +414,16 @@ button.chip[aria-selected="true"]{background:var(--forest); color:var(--sur-fore
 .st li h3 span{font-family:var(--f-mono); font-weight:700; color:var(--data-deep)}
 .st__bar{height:8px; border-radius:99px; background:var(--piste); overflow:hidden}
 .st__bar i{display:block; height:100%; border-radius:99px; background:var(--data)}
+/* Fusion forteresses × dominance et carte « points faibles » (12/08/2026).
+   Les points faibles portent l'AMBRE, jamais le rouge : un trou de couverture
+   est un sujet à écrire, pas un incident (§2 bis du brief de front). */
+.st__n1{font-family:var(--f-mono); font-size:.72rem; color:var(--ink-faint); margin-top:6px}
+.st__n1 b{color:var(--ink-soft)}
+.st--faible li h3 span{color:var(--opp)}
+.st__bar--faible i{background:var(--opp)}
+.wk__occ{font-size:.78rem; color:var(--ink-soft); margin-top:5px}
+.wk__occ b{font-family:var(--f-mono); font-size:.76rem; color:var(--ink); font-weight:700}
+.wk__occ--libre{color:var(--ink-faint); font-style:italic}
 
 .engines{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
   gap:14px}
@@ -960,45 +970,79 @@ def _voix(v: dict) -> str:
 
 
 def _forteresses(f: dict) -> str:
+    """Fusion du 12/08/2026 : cette carte portait le taux de citation, la carte
+    « Dominance » portait la part de n°1 — sur presque les mêmes requêtes, donc
+    lues comme une répétition. Les deux mesures tiennent maintenant sur la même
+    ligne : citée à X %, première à Y %."""
     lead = (
         f"<strong>{_e(f['lead']['texte_requete'])}</strong> à {f['lead']['taux']:.0f} % : la preuve que la "
         f"méthode fonctionne. Il suffit de la répliquer sur les sujets de la carte « À faire »."
         if f["lead"]["variante"] == "exemples"
         else "Aucune requête au-dessus de 60 % pour l'instant."
     )
-    st = "".join(
-        f'<li><h3>{_e(q["texte"])} <span>{q["taux"]:.0f} %</span></h3>'
-        f'<div class="st__bar"><i style="width:{q["taux"]:.0f}%"></i></div></li>'
-        for q in f["items"]
-    )
+    if f["a_dominance"]:
+        lead += (f' Et être citée ne suffit pas : quand la marque apparaît, elle est '
+                 f'<strong>source n°1 dans {f["part_n1"]:.0f} % des cas</strong>, et nommée dans '
+                 f'le texte même de la réponse dans {f["part_texte"]:.0f} % des appels.')
+    st = ""
+    for q in f["items"]:
+        # « — » et non « 0 % » : une part de n°1 sur zéro citation n'existe
+        # pas, elle ne vaut pas zéro (même règle que le hero d'une collecte
+        # morte, passe du 06/08).
+        n1 = f'{q["part_n1"]:.0f} %' if q["part_n1"] is not None else "—"
+        st += (f'<li><h3>{_e(q["texte"])} <span>{q["taux"]:.0f} %</span></h3>'
+               f'<div class="st__bar"><i style="width:{q["taux"]:.0f}%"></i></div>'
+               f'<p class="st__n1">source n°1 dans <b>{n1}</b> de ses citations</p></li>')
     return f"""    <section class="card">
       <div class="card__head"><h2>Tes forteresses</h2>
-        <span class="card__hint">ce qui a été travaillé se voit</span></div>
+        <span class="card__hint">citée, et à quelle place</span></div>
       <p class="card__lead">{lead}</p>
       <ul class="st">{st}</ul>
     </section>"""
 
 
-def _dominance(dom: dict) -> str:
-    items = "".join(
-        f'<li><h3>{_e(x["texte"])} <span>{x["part"]:.0f} %</span></h3>'
-        f'<div class="st__bar"><i style="width:{max(x["part"], 2):.0f}%"></i></div></li>'
-        for x in dom["items"]
-    ) or "<li>Aucune citation sur cette collecte.</li>"
-    lead = (
-        "La marque n'est encore citée nulle part : la dominance se mesurera "
-        "à partir de la première citation."
-        if dom["vide"] else
-        f'Être citée ne suffit pas. Quand la marque apparaît, elle est '
-        f'<strong>source n°1 dans {dom["part_n1"]:.0f} % des cas</strong>, et nommée dans le texte même '
-        f'de la réponse dans {dom["part_texte"]:.0f} % des appels. C\'est la prochaine frontière une fois '
-        f'la citation acquise.'
-    )
+def _faiblesses(w: dict) -> str:
+    """Carte demandée par Marion le 12/08/2026, à la place de « Dominance ».
+
+    Elle répond à sa question — « une fois les opportunités faites, comment je
+    passe devant le concurrent ? » — en montrant, sur chaque trou, QUI occupe
+    la place. ⚠️ Ce n'est pas un doublon de « À faire » : celle-là prescrit
+    trois actions classées par gain, celle-ci pose le diagnostic sur tous les
+    trous et nomme l'occupant. Un terrain vide et un terrain tenu par un
+    concurrent n'appellent pas le même contenu.
+    """
+    if w["aucune"]:
+        return f"""    <section class="card">
+      <div class="card__head"><h2>Tes points faibles</h2>
+        <span class="card__hint">et qui prend la place</span></div>
+      <p class="card__lead">Aucune requête suivie sous {w['seuil']:.0f} % de citation :
+      il n'y a pas de trou à combler sur cette collecte.</p>
+    </section>"""
+
+    items = ""
+    for q in w["items"]:
+        if q["occupants"]:
+            occ = ('<p class="wk__occ">La place est prise par '
+                   + ", ".join(f'<b>{_e(o)}</b>' for o in q["occupants"]) + '.</p>')
+        else:
+            occ = ('<p class="wk__occ wk__occ--libre">Personne ne s\'impose : '
+                   'terrain libre, pas une place à prendre.</p>')
+        st = f'{q["cites"]} citation{"s" if q["cites"] > 1 else ""} sur {q["ok"]} réponses'
+        items += (f'<li><h3>{_e(q["texte"])} <span>{q["taux"]:.0f} %</span></h3>'
+                  f'<div class="st__bar st__bar--faible">'
+                  f'<i style="width:{max(q["taux"], 2):.0f}%"></i></div>'
+                  f'<p class="st__n1">{st}</p>{occ}</li>')
+    reste = ""
+    if w["n_total"] > len(w["items"]):
+        reste = (f' Les {len(w["items"])} plus bas sont ici, sur '
+                 f'{w["n_total"]} au total.')
     return f"""    <section class="card">
-      <div class="card__head"><h2>Dominance</h2>
-        <span class="card__hint">source n°1, pas juste citée</span></div>
-      <p class="card__lead">{lead}</p>
-      <ul class="st">{items}</ul>
+      <div class="card__head"><h2>Tes points faibles</h2>
+        <span class="card__hint">et qui prend la place</span></div>
+      <p class="card__lead">Les requêtes suivies sous {w['seuil']:.0f} % de citation, et le
+      domaine qui occupe le terrain à ta place.{reste} <strong>Savoir qui est devant
+      ne dit pas encore pourquoi</strong> : c'est ce que la carte ne prétend pas faire.</p>
+      <ul class="st st--faible">{items}</ul>
     </section>"""
 
 
@@ -1215,7 +1259,9 @@ def _alignement(al: dict) -> str:
 def _vue_ensemble(d: dict) -> str:
     """Vue 1 (Passe 1 corrigée) : hero avec sa règle graduée, les cartes
     moteurs, « À faire », le duel, la part de voix avec ses stats, puis
-    forteresses et dominance, et la courbe en toute dernière position."""
+    forteresses et points faibles, et la courbe en toute dernière position.
+    *(12/08/2026 : « dominance » a fusionné dans « forteresses », sa place est
+    prise par « points faibles », qui nomme l'occupant de chaque trou.)*"""
     return f"""
 {_hero(d["hero"])}
   <div class="engines">{_moteurs(d["moteurs"])}</div>
@@ -1228,7 +1274,7 @@ def _vue_ensemble(d: dict) -> str:
 
   <div class="grid">
 {_forteresses(d["forteresses"])}
-{_dominance(d["dominance"])}
+{_faiblesses(d["faiblesses"])}
   </div>
 
 {_courbe(d["courbe"])}"""

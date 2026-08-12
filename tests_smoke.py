@@ -143,9 +143,32 @@ assert "attend une collecte" in h and "Atelier Martin" in h
 # Matrice vide : jamais une vue blanche
 h = rendu._matrice({"affiche": False, "lead": {}, "colonnes": [], "lignes": []})
 assert "première collecte réussie" in h
-# Dominance jamais citee : le lead ne pretend pas « 0 % des cas »
-h = rendu._dominance({"vide": True, "part_n1": 0, "part_texte": 0, "items": []})
-assert "première citation" in h and "0 % des cas" not in h
+# Forteresses (dominance fusionnee dedans le 12/08/2026) : jamais citee, la
+# phrase de dominance NE SORT PAS — elle pretendrait « source n°1 dans 0 % des
+# cas » alors qu'il n'y a aucune citation d'ou tirer une part. Garantie heritee
+# de l'ancienne carte Dominance, elle survit a la fusion.
+h = rendu._forteresses({"lead": {"variante": "vide", "texte_requete": None, "taux": None},
+                        "part_n1": 0, "part_texte": 0, "a_dominance": False, "items": []})
+assert "0 % des cas" not in h and "au-dessus de 60 %" in h
+# Et quand il y a de la dominance, les deux mesures tiennent sur la meme ligne.
+h = rendu._forteresses({"lead": {"variante": "exemples", "texte_requete": "Q ?", "taux": 90.0},
+                        "part_n1": 32.0, "part_texte": 21.0, "a_dominance": True,
+                        "items": [{"texte": "Q ?", "taux": 90.0, "part_n1": 32.0},
+                                  {"texte": "R ?", "taux": 70.0, "part_n1": None}]})
+assert "source n°1 dans 32 % des cas" in h and "<b>32 %</b>" in h
+# part_n1 absente : « — », jamais un faux 0 % (meme regle que le hero mort)
+assert "<b>—</b>" in h
+
+# Points faibles : sans trou, la carte le CONSTATE au lieu de lister du vide
+h = rendu._faiblesses({"seuil": 25.0, "aucune": True, "n_total": 0, "items": []})
+assert "pas de trou à combler" in h
+# Avec des trous : l'occupant est nomme, et un terrain vide se dit autrement
+h = rendu._faiblesses({"seuil": 25.0, "aucune": False, "n_total": 4, "items": [
+    {"texte": "Q1 ?", "taux": 0.0, "cites": 0, "ok": 20, "occupants": ["exemple.fr"]},
+    {"texte": "Q2 ?", "taux": 8.0, "cites": 1, "ok": 12, "occupants": []}]})
+assert "exemple.fr" in h and "terrain libre" in h
+assert "sur 4 au total" in h            # le reste non affiche est annonce
+assert "ne dit pas encore pourquoi" in h  # la carte ne surpromet pas
 # Part de voix sans aucune source
 h = rendu._voix({"total_citations": 1, "domaines_distincts": 0,
                  "stats": {"place": None, "place_suffixe": "e", "domaines": 0,
